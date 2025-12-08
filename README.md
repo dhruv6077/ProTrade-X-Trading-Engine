@@ -86,8 +86,7 @@ This ensures I never lose critical financial data.
 
 ## 🛠️ Tech Stack Summary
 
-- **Language:** Java 17
-- **Language:** Java 21
+- **Language:** Java
 - **Database:** PostgreSQL
 - **Concurrency:** ExecutorService, ReentrantReadWriteLock
 - **Design Patterns:**
