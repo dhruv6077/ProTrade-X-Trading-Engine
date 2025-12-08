@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Platform - Enterprise Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="logo-section">
+          <div class="logo-icon">TP</div>
+          <span class="logo-text">Trading<br />Platform</span>
+        </div>
+        <nav class="nav-menu">
+          <a href="#" class="nav-item active">
+            <span class="icon">📊</span> Dashboard
+          </a>
+          <a href="#" class="nav-item">
+            <span class="icon">📈</span> Market
+          </a>
+          <a href="#" class="nav-item">
+            <span class="icon">📚</span> Order Book
+          </a>
+          <a href="#" class="nav-item">
+            <span class="icon">📜</span> Trade Log
+          </a>
+          <a href="#" class="nav-item">
+            <span class="icon">⚙️</span> Settings
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="user-profile">
+            <div class="avatar">A</div>
+            <div class="user-info">
+              <span class="name">Admin User</span>
+              <span class="role">Super Admin</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Header -->
+        <header class="top-bar">
+          <div class="system-status">
+            <span class="status-dot" id="status-dot"></span>
+            <span class="status-text" id="system-status">System Offline</span>
+          </div>
+          <div class="header-actions">
+            <div class="stats-pill">
+              <span class="label">Latency</span>
+              <span class="value">12ms</span>
+            </div>
+            <button id="start-btn" class="btn btn-primary">
+              <span class="icon">▶</span> Start Simulation
+            </button>
+            <button id="stop-btn" class="btn btn-danger">
+              <span class="icon">⏹</span> Stop
+            </button>
+          </div>
+        </header>
+
+        <!-- Dashboard Grid -->
+        <div class="dashboard-grid">
+          <!-- Market Overview Section -->
+          <section class="market-section">
+            <div class="section-header">
+              <h2>Market Overview</h2>
+              <div class="filter-tabs">
+                <button class="tab active">All</button>
+                <button class="tab">Tech</button>
+                <button class="tab">Indices</button>
+              </div>
+            </div>
+            <div class="market-cards" id="market-container">
+              <!-- Cards injected by JS -->
+              <div class="loading-state">Initializing Market Data Stream...</div>
+            </div>
+          </section>
+
+          <!-- Trade Log Section -->
+          <section class="log-section">
+            <div class="section-header">
+              <h2>Live Trade Log</h2>
+              <div class="log-controls">
+                <span class="live-badge">● LIVE</span>
+                <input
+                  type="text"
+                  id="log-filter"
+                  placeholder="Filter logs..."
+                  class="search-input"
+                />
+              </div>
+            </div>
+            <div class="console-window">
+              <div class="console-header">
+                <span class="terminal-dot red"></span>
+                <span class="terminal-dot yellow"></span>
+                <span class="terminal-dot green"></span>
+                <span class="console-title">audit_stream.log</span>
+              </div>
+              <div class="log-container" id="log-container">
+                <!-- Logs injected by JS -->
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
