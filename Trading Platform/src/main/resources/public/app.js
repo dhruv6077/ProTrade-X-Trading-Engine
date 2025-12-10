@@ -10,7 +10,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // State
     let priceHistory = {}; // { symbol: [price1, price2, ...] }
     let previousPrices = {}; // { symbol: price }
+    let startingPrices = {}; // { symbol: starting price }
     let allLogs = [];
+    let allMarketData = []; // Store all market data
+    let currentFilter = 'All'; // Current active filter
 
     // Event Listeners
     startBtn.addEventListener('click', () => {
@@ -66,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(res => res.json())
             .then(data => {
                 if (data && data.length > 0) {
+                    allMarketData = data;
                     renderMarketCards(data);
                 }
             })
@@ -83,6 +87,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Parse price
             const currentPrice = parseFloat(item.bid.replace('$', '')) || 0;
             const prevPrice = previousPrices[item.symbol] || currentPrice;
+            
+            // Initialize starting price on first occurrence
+            if (!startingPrices[item.symbol]) {
+                startingPrices[item.symbol] = currentPrice;
+            }
             
             // Update history for sparkline
             if (!priceHistory[item.symbol]) priceHistory[item.symbol] = [];
@@ -107,6 +116,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 priceEl.classList.remove('flash-up', 'flash-down');
                 void priceEl.offsetWidth; // trigger reflow
                 priceEl.classList.add(changeClass);
+            }
+
+            // Calculate and update percentage change relative to starting price
+            const startPrice = startingPrices[item.symbol];
+            const percentChange = startPrice > 0 ? ((currentPrice - startPrice) / startPrice) * 100 : 0;
+            const percentChangeEl = card.querySelector('.price-change span');
+            if (percentChangeEl) {
+                const sign = percentChange >= 0 ? '+' : '';
+                percentChangeEl.textContent = `${sign}${percentChange.toFixed(2)}%`;
+                percentChangeEl.style.color = percentChange >= 0 ? '#00e676' : '#ff5252';
             }
 
             // Update Bid/Ask
