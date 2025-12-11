@@ -18,6 +18,13 @@ public enum AuditEventType {
     // Trade Events
     TRADE_EXECUTED("Trade executed between buy and sell orders"),
     
+    // Advanced Order Events
+    OCO_LINKED("One-Cancels-Other orders linked"),
+    OCO_TRIGGERED("OCO order triggered, linked order cancelled"),
+    FOK_REJECTED("Fill-or-Kill order rejected due to insufficient liquidity"),
+    STP_VIOLATION("Self-Trade Prevention violation detected"),
+    ORDER_REJECTED("Order rejected by validation"),
+    
     // Market Events
     MARKET_UPDATE("Market data updated"),
     PRODUCT_ADDED("New product added to system"),
