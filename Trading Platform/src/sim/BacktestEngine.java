@@ -129,7 +129,7 @@ public class BacktestEngine {
             case BUY:
                 portfolio.addPosition(product, quantity, price, "BUY");
                 logger.debug("BUY signal for {} @ {}", product, price);
-                recordTrade(product, quantity, price, "BUY", event.getTimestamp().getTime());
+                recordTrade(product, quantity, price, "BUY", event.getTimestamp().toEpochMilli());
                 break;
                 
             case SELL:
@@ -137,7 +137,7 @@ public class BacktestEngine {
                 if (pos != null && pos.getQuantity() > 0) {
                     portfolio.closePosition(product, Math.min(pos.getQuantity(), quantity), price);
                     logger.debug("SELL signal for {} @ {}", product, price);
-                    recordTrade(product, quantity, price, "SELL", event.getTimestamp().getTime());
+                    recordTrade(product, quantity, price, "SELL", event.getTimestamp().toEpochMilli());
                 }
                 break;
                 

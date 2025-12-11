@@ -47,13 +47,13 @@ public class SelfTradePreventionEngine {
      * @return True if both orders belong to the same trader
      */
     public boolean isSelfTrade(Order incomingOrder, Order restingOrder) {
-        String incomingTrader = extractTraderId(incomingOrder.getOrderId());
-        String restingTrader = extractTraderId(restingOrder.getOrderId());
+        String incomingTrader = extractTraderId(incomingOrder.getId());
+        String restingTrader = extractTraderId(restingOrder.getId());
         
         if (incomingTrader == null || restingTrader == null) {
             // If we can't extract trader ID, allow the trade (assume different traders)
             logger.warn("Could not extract trader ID from orders: {} or {}", 
-                incomingOrder.getOrderId(), restingOrder.getOrderId());
+                incomingOrder.getId(), restingOrder.getId());
             return false;
         }
         
@@ -61,7 +61,7 @@ public class SelfTradePreventionEngine {
         
         if (isSelfTrade) {
             logger.debug("Self-trade detected: {} trying to match with {}", 
-                incomingOrder.getOrderId(), restingOrder.getOrderId());
+                incomingOrder.getId(), restingOrder.getId());
         }
         
         return isSelfTrade;
@@ -79,7 +79,7 @@ public class SelfTradePreventionEngine {
             return STPAction.ALLOW;
         }
         
-        logger.info("STP Action: {} for incoming order {}", defaultAction, incomingOrder.getOrderId());
+        logger.info("STP Action: {} for incoming order {}", defaultAction, incomingOrder.getId());
         return defaultAction;
     }
 

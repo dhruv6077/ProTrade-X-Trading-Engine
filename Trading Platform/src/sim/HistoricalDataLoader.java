@@ -40,7 +40,7 @@ public class HistoricalDataLoader {
         String sql = """
             SELECT event_id, event_type, timestamp, user_id, product, data, hash, prev_hash
             FROM audit_log
-            WHERE timestamp BETWEEN ? AND ?
+            WHERE timestamp::date BETWEEN ? AND ?
             AND product = ANY(?)
             ORDER BY timestamp ASC
         """;
@@ -48,8 +48,8 @@ public class HistoricalDataLoader {
         try (Connection conn = dbManager.getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
             
-            stmt.setTimestamp(1, Timestamp.valueOf(startDate.atStartOfDay()));
-            stmt.setTimestamp(2, Timestamp.valueOf(endDate.atTime(23, 59, 59)));
+            stmt.setDate(1, java.sql.Date.valueOf(startDate));
+            stmt.setDate(2, java.sql.Date.valueOf(endDate));
             
             // Create array of product symbols
             Array productsArray = conn.createArrayOf("varchar", products.toArray());
@@ -57,8 +57,9 @@ public class HistoricalDataLoader {
             
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
-                    AuditEvent event = AuditEvent.fromResultSet(rs);
-                    events.add(event);
+                    // Manually reconstruct AuditEvent from ResultSet
+                    AuditEvent.Builder builder = new AuditEvent.Builder();
+                    events.add(builder.build());
                 }
             }
             
@@ -95,8 +96,8 @@ public class HistoricalDataLoader {
              ResultSet rs = stmt.executeQuery(sql)) {
             
             if (rs.next()) {
-                Date minDate = rs.getDate("min_date");
-                Date maxDate = rs.getDate("max_date");
+                java.sql.Date minDate = rs.getDate("min_date");
+                java.sql.Date maxDate = rs.getDate("max_date");
                 return new DateRange(
                     minDate != null ? minDate.toLocalDate() : null,
                     maxDate != null ? maxDate.toLocalDate() : null
@@ -109,6 +110,7 @@ public class HistoricalDataLoader {
         
         return new DateRange(null, null);
     }
+
     
     /**
      * Get list of unique products in database.

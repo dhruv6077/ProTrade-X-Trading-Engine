@@ -1,6 +1,5 @@
 package logging;
 
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,8 +18,8 @@ public class LatencyMonitor {
     private final Queue<OrderProcessingTimeline> recentTimelines;
     private final int maxCapacity;
     
-    // Statistics
-    private final DescriptiveStatistics stats;
+    // Statistics tracking
+    private final List<Long> latencies;
     private long totalProcessedOrders;
     
     // Latency violations tracking
@@ -29,7 +28,7 @@ public class LatencyMonitor {
     private LatencyMonitor() {
         this.maxCapacity = 10000;
         this.recentTimelines = new ConcurrentLinkedQueue<>();
-        this.stats = new DescriptiveStatistics(maxCapacity);
+        this.latencies = Collections.synchronizedList(new ArrayList<>());
         this.violations = new ConcurrentLinkedQueue<>();
         this.totalProcessedOrders = 0;
     }
@@ -47,7 +46,7 @@ public class LatencyMonitor {
         }
         
         long latency = timeline.getEndToEndLatency();
-        stats.addValue(latency);
+        latencies.add(latency);
         recentTimelines.offer(timeline);
         totalProcessedOrders++;
         
@@ -71,19 +70,32 @@ public class LatencyMonitor {
      * Get comprehensive latency statistics.
      */
     public LatencyStats getStats() {
-        if (stats.getN() == 0) {
+        if (latencies.isEmpty()) {
             return new LatencyStats(0, 0, 0, 0, 0, 0, 0);
         }
         
+        List<Long> sorted = new ArrayList<>(latencies);
+        Collections.sort(sorted);
+        
         return new LatencyStats(
-            (long) stats.getMin(),
-            (long) stats.getMax(),
-            (long) stats.getMean(),
-            (long) stats.getPercentile(50),   // P50 (median)
-            (long) stats.getPercentile(95),   // P95
-            (long) stats.getPercentile(99),   // P99
-            (long) stats.getPercentile(99.9)  // P99.9
+            sorted.get(0),                                    // Min
+            sorted.get(sorted.size() - 1),                    // Max
+            (long) sorted.stream().mapToLong(Long::longValue).average().orElse(0),  // Mean
+            getPercentile(sorted, 50),                        // P50 (median)
+            getPercentile(sorted, 95),                        // P95
+            getPercentile(sorted, 99),                        // P99
+            getPercentile(sorted, 99.9)                       // P99.9
         );
+    }
+    
+    /**
+     * Calculate percentile from sorted data.
+     */
+    private long getPercentile(List<Long> sorted, double percentile) {
+        if (sorted.isEmpty()) return 0;
+        int index = (int) Math.ceil((percentile / 100.0) * sorted.size()) - 1;
+        index = Math.max(0, Math.min(index, sorted.size() - 1));
+        return sorted.get(index);
     }
     
     /**
@@ -129,7 +141,7 @@ public class LatencyMonitor {
     public void reset() {
         recentTimelines.clear();
         violations.clear();
-        stats.clear();
+        latencies.clear();
         totalProcessedOrders = 0;
         logger.info("Latency monitor reset");
     }

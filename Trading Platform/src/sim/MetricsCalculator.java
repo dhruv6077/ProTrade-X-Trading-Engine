@@ -1,6 +1,5 @@
 package sim;
 
-import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,14 +49,11 @@ public class MetricsCalculator {
         // Volatility and risk-adjusted returns
         List<Double> dailyReturns = calculateDailyReturns(trades);
         if (!dailyReturns.isEmpty()) {
-            DescriptiveStatistics stats = new DescriptiveStatistics();
-            for (Double ret : dailyReturns) {
-                stats.addValue(ret);
-            }
-            
-            metrics.setVolatility(stats.getStandardDeviation());
+            // Calculate standard deviation manually
+            double volatility = calculateStandardDeviation(dailyReturns);
+            metrics.setVolatility(volatility);
             metrics.setSharpeRatio(calculateSharpeRatio(metrics.getTotalReturn(), 
-                                                       metrics.getVolatility(), years));
+                                                       volatility, years));
             metrics.setSortinoRatio(calculateSortinoRatio(dailyReturns, years));
         }
         
@@ -165,6 +161,23 @@ public class MetricsCalculator {
         
         double annualizedReturn = Math.pow(1 + totalReturn, 1.0 / Math.max(years, 1)) - 1;
         return (annualizedReturn - RISK_FREE_RATE) / volatility;
+    }
+    
+    /**
+     * Calculate standard deviation of returns.
+     */
+    private double calculateStandardDeviation(List<Double> returns) {
+        if (returns.isEmpty()) {
+            return 0;
+        }
+        
+        double mean = returns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        double sumSquaredDiff = 0;
+        for (Double ret : returns) {
+            sumSquaredDiff += (ret - mean) * (ret - mean);
+        }
+        
+        return Math.sqrt(sumSquaredDiff / returns.size());
     }
     
     /**

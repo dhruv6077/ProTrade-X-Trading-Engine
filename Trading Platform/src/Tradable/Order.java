@@ -174,3 +174,4 @@ public class Order implements Tradable {
     public long getOrderQuantity() {
         return remainingVolume;
     }
+}
