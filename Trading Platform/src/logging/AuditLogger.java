@@ -2,6 +2,7 @@ package logging;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import persistence.DatabaseAuditLogger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -51,8 +52,15 @@ public class AuditLogger {
             String currentHash = calculateHash(dataToHash);
             event.setHash(currentHash);
             
-            // Log the event
+            // Log the event to file
             auditLog.info(event.toJson());
+            
+            // Also log to database
+            try {
+                DatabaseAuditLogger.getInstance().logEvent(event);
+            } catch (Exception e) {
+                logger.warn("Failed to log event to database", e);
+            }
             
             // Update previous hash for next event
             previousHash = currentHash;
