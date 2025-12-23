@@ -6,6 +6,7 @@ Tradable/Order.class
 persistence/DatabaseManager.class
 logging/AuditLogger.class
 Exceptions/InvalidUserInput.class
+monitoring/PerformanceMonitor.class
 Market/CurrentMarketPublisher.class
 Main.class
 logging/HashChainValidator.class
@@ -31,6 +32,7 @@ Tradable/ProductBookSide.class
 Price/PriceFactory.class
 Tradable/Tradable.class
 sim/SimulationManager.class
+monitoring/PerformanceMonitor$Timer.class
 sim/BaseBot.class
 logging/AuditEvent.class
 User/User.class

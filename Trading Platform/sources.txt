@@ -23,6 +23,7 @@ src/Market/CurrentMarketSide.java
 src/Market/CurrentMarketTracker.java
 src/Market/Main.java
 src/Market/CurrentMarketObserver.java
+src/monitoring/PerformanceMonitor.java
 src/sim/MarketMakerBot.java
 src/sim/BaseBot.java
 src/sim/SimulationManager.java

@@ -8,6 +8,7 @@ import Price.*;
 import logging.AuditEvent;
 import logging.AuditEventType;
 import logging.AuditLogger;
+import monitoring.PerformanceMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,7 +18,7 @@ import User.UserManager;
 public class ProductBook {
     private static final Logger logger = LoggerFactory.getLogger(ProductBook.class);
     private final AuditLogger auditLogger = AuditLogger.getInstance();
-    
+
     private final String product;
     ProductBookSide buySide;
     ProductBookSide sellSide;
@@ -33,7 +34,10 @@ public class ProductBook {
     }
 
     public TradableDTO add(Tradable t) throws InvalidUserInput, DataValidationException, InvalidPriceOperation {
-        if(t == null) {
+        // Start performance timing
+        PerformanceMonitor.Timer timer = new PerformanceMonitor.Timer();
+
+        if (t == null) {
             throw new InvalidUserInput("Tradable cannot be null.");
         }
 
@@ -45,7 +49,7 @@ public class ProductBook {
             logger.info("ADD: {}: {}", SELL, t);
             side = sellSide;
         }
-        
+
         // Audit log the order placement
         AuditEvent event = new AuditEvent.Builder()
                 .eventType(AuditEventType.ORDER_PLACED)
@@ -57,10 +61,14 @@ public class ProductBook {
                 .addData("orderId", t.getId())
                 .build();
         auditLogger.logEvent(event);
-        
+
         TradableDTO addDTO = side.add(t);
         tryTrade();
         updateMarket();
+
+        // Stop performance timing and record latency
+        timer.stop();
+
         return addDTO;
 
     }
@@ -71,7 +79,7 @@ public class ProductBook {
         logger.info("ADD: {}: {}", BUY, qte.getQuoteSide(BUY));
         arrOfDtos[1] = sellSide.add(qte.getQuoteSide(SELL));
         logger.info("ADD: {}: {}", SELL, qte.getQuoteSide(SELL));
-        
+
         // Audit log the quote submission
         AuditEvent event = new AuditEvent.Builder()
                 .eventType(AuditEventType.QUOTE_SUBMITTED)
@@ -83,7 +91,7 @@ public class ProductBook {
                 .addData("sellQuantity", qte.getQuoteSide(SELL).getOriginalVolume())
                 .build();
         auditLogger.logEvent(event);
-        
+
         tryTrade();
         updateMarket();
         return arrOfDtos;
@@ -91,12 +99,12 @@ public class ProductBook {
 
     public TradableDTO cancel(BookSide side, String orderId) throws InvalidUserInput, InvalidPriceOperation {
         TradableDTO sides;
-        if(side == BUY) {
+        if (side == BUY) {
             sides = buySide.cancel(orderId);
         } else {
-            sides =  sellSide.cancel(orderId);
+            sides = sellSide.cancel(orderId);
         }
-        
+
         // Audit log the cancellation
         if (sides != null) {
             AuditEvent event = new AuditEvent.Builder()
@@ -110,19 +118,20 @@ public class ProductBook {
             auditLogger.logEvent(event);
             logger.info("Order cancelled: {} {} {}", side, orderId, sides.product);
         }
-        
+
         updateMarket();
         return sides;
     }
 
     public void tryTrade() throws InvalidUserInput, DataValidationException {
-        Price topBuyPrice = buySide.topOfBookPrice();      // Get Top Buy Price
-        Price topSellPrice = sellSide.topOfBookPrice();    // Get Top Sell Price
+        Price topBuyPrice = buySide.topOfBookPrice(); // Get Top Buy Price
+        Price topSellPrice = sellSide.topOfBookPrice(); // Get Top Sell Price
 
         while (topBuyPrice != null && topSellPrice != null && topBuyPrice.compareTo(topSellPrice) >= 0) {
-            int topBuyVolume = buySide.topOfBookVolume();       // Get Top Buy Volume
-            int topSellVolume = sellSide.topOfBookVolume();     // Get Top Sell Volume
-            int volumeToTrade = Math.min(topBuyVolume, topSellVolume);      // Volume to trade is the MIN of the Buy and Sell volumes
+            int topBuyVolume = buySide.topOfBookVolume(); // Get Top Buy Volume
+            int topSellVolume = sellSide.topOfBookVolume(); // Get Top Sell Volume
+            int volumeToTrade = Math.min(topBuyVolume, topSellVolume); // Volume to trade is the MIN of the Buy and Sell
+                                                                       // volumes
 
             // Audit log the trade execution
             AuditEvent event = new AuditEvent.Builder()
@@ -139,8 +148,8 @@ public class ProductBook {
             sellSide.tradeOut(topSellPrice, volumeToTrade);
             buySide.tradeOut(topBuyPrice, volumeToTrade);
 
-            topBuyPrice = buySide.topOfBookPrice();     // Get Top Buy Price
-            topSellPrice = sellSide.topOfBookPrice();   // Get Top Sell Price
+            topBuyPrice = buySide.topOfBookPrice(); // Get Top Buy Price
+            topSellPrice = sellSide.topOfBookPrice(); // Get Top Sell Price
         }
     }
 
@@ -153,7 +162,6 @@ public class ProductBook {
         UserManager.getInstance().getUser(userName).addTradable(arrayOfDTO[1]);
         updateMarket();
 
-
         return arrayOfDTO;
     }
 
@@ -163,36 +171,33 @@ public class ProductBook {
         Price topBuyPrice = buySide.topOfBookPrice();
         Price topSellPrice = sellSide.topOfBookPrice();
 
-        if(topBuyPrice == null && topSellPrice != null) {
-            CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, 0, topSellPrice, sellSide.topOfBookVolume());
+        if (topBuyPrice == null && topSellPrice != null) {
+            CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, 0, topSellPrice,
+                    sellSide.topOfBookVolume());
         } else if (topSellPrice == null && topBuyPrice != null) {
-            CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, buySide.topOfBookVolume(), topSellPrice, 0);
+            CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, buySide.topOfBookVolume(),
+                    topSellPrice, 0);
         }
 
         if (topBuyPrice != null && topSellPrice != null) {
             topBuyVolume = buySide.topOfBookVolume();
             topSellVolume = sellSide.topOfBookVolume();
 
-            CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, topBuyVolume, topSellPrice, topSellVolume);
+            CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, topBuyVolume, topSellPrice,
+                    topSellVolume);
         }
 
-        if(topBuyPrice == null && topSellPrice == null) {
+        if (topBuyPrice == null && topSellPrice == null) {
             CurrentMarketTracker.getInstance().updateMarket(product, topBuyPrice, 0, topSellPrice, 0);
         }
 
-
-
-
     }
 
-
-        @Override
-        public String toString() {
-            logger.debug("-----------------------------------");
-            logger.debug("Product Book: {}", product);
-            return "%s\n%s\n-----------------------------------".formatted(buySide.toString(), sellSide.toString());
-        }
-
-
+    @Override
+    public String toString() {
+        logger.debug("-----------------------------------");
+        logger.debug("Product Book: {}", product);
+        return "%s\n%s\n-----------------------------------".formatted(buySide.toString(), sellSide.toString());
+    }
 
 }

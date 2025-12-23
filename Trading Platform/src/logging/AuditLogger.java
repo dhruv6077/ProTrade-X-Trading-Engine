@@ -15,12 +15,13 @@ import java.security.NoSuchAlgorithmException;
 public class AuditLogger {
     private static final Logger auditLog = LoggerFactory.getLogger("AUDIT");
     private static final Logger logger = LoggerFactory.getLogger(AuditLogger.class);
-    
+
     private static AuditLogger instance;
     private String previousHash = "0";
     private final MessageDigest digest;
     private final Object lock = new Object();
-    
+    private final java.util.List<java.util.function.Consumer<AuditEvent>> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
     private AuditLogger() {
         try {
             this.digest = MessageDigest.getInstance("SHA-256");
@@ -28,7 +29,7 @@ public class AuditLogger {
             throw new RuntimeException("SHA-256 algorithm not available", e);
         }
     }
-    
+
     /**
      * Gets the singleton instance of AuditLogger.
      */
@@ -38,7 +39,14 @@ public class AuditLogger {
         }
         return instance;
     }
-    
+
+    /**
+     * Adds a listener for audit events.
+     */
+    public void addListener(java.util.function.Consumer<AuditEvent> listener) {
+        listeners.add(listener);
+    }
+
     /**
      * Logs an audit event with hash chain protection.
      */
@@ -46,29 +54,38 @@ public class AuditLogger {
         synchronized (lock) {
             // Set previous hash
             event.setPreviousHash(previousHash);
-            
+
             // Calculate hash for this event
             String dataToHash = previousHash + event.getDataForHashing();
             String currentHash = calculateHash(dataToHash);
             event.setHash(currentHash);
-            
+
             // Log the event to file
             auditLog.info(event.toJson());
-            
+
             // Also log to database
             try {
                 DatabaseAuditLogger.getInstance().logEvent(event);
             } catch (Exception e) {
                 logger.warn("Failed to log event to database", e);
             }
-            
+
             // Update previous hash for next event
             previousHash = currentHash;
-            
+
             logger.debug("Audit event logged: {} - {}", event.getEventType(), event.getEventId());
         }
+
+        // Notify listeners
+        for (java.util.function.Consumer<AuditEvent> listener : listeners) {
+            try {
+                listener.accept(event);
+            } catch (Exception e) {
+                logger.error("Error in audit event listener", e);
+            }
+        }
     }
-    
+
     /**
      * Convenience method to log an event with minimal information.
      */
@@ -80,7 +97,7 @@ public class AuditLogger {
                 .build();
         logEvent(event);
     }
-    
+
     /**
      * Calculates SHA-256 hash of the input string.
      */
@@ -88,7 +105,7 @@ public class AuditLogger {
         byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
         return bytesToHex(hashBytes);
     }
-    
+
     /**
      * Converts byte array to hexadecimal string.
      */
@@ -103,7 +120,7 @@ public class AuditLogger {
         }
         return hexString.toString();
     }
-    
+
     /**
      * Gets the current hash (for testing/validation).
      */
@@ -112,7 +129,7 @@ public class AuditLogger {
             return previousHash;
         }
     }
-    
+
     /**
      * Resets the hash chain (should only be used for testing).
      */

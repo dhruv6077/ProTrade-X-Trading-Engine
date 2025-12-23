@@ -45,7 +45,7 @@
           <div class="header-actions">
             <div class="stats-pill">
               <span class="label">Latency</span>
-              <span class="value">12ms</span>
+              <span class="value" id="latency-value">~Calculating...</span>
             </div>
             <button id="start-btn" class="btn btn-primary">
               <span class="icon">▶</span> Start Simulation
@@ -65,7 +65,9 @@
             </div>
             <div class="market-cards" id="market-container">
               <!-- Cards injected by JS -->
-              <div class="loading-state">Initializing Market Data Stream...</div>
+              <div class="loading-state">
+                Initializing Market Data Stream...
+              </div>
             </div>
           </section>
 

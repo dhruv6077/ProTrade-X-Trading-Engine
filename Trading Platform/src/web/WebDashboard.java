@@ -8,9 +8,16 @@ import Market.CurrentMarketObserver;
 import Market.CurrentMarketPublisher;
 import Market.CurrentMarketSide;
 import com.google.gson.Gson;
+import monitoring.PerformanceMonitor;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import logging.AuditEvent;
+import logging.AuditEventType;
+import logging.AuditLogger;
+
+import java.time.format.DateTimeFormatter;
+import java.time.ZoneId;
 
 public class WebDashboard {
     private static Javalin app;
@@ -18,6 +25,8 @@ public class WebDashboard {
     private static final Queue<String> tradeLogs = new ConcurrentLinkedQueue<>();
     private static final int MAX_LOGS = 100;
     private static final Map<String, Map<String, String>> latestMarketData = new ConcurrentHashMap<>();
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+            .withZone(ZoneId.systemDefault());
 
     private static final CurrentMarketObserver marketObserver = new CurrentMarketObserver() {
         @Override
@@ -40,6 +49,36 @@ public class WebDashboard {
 
         // Initialize simulation (loads products and bots)
         SimulationManager.getInstance().initialize();
+
+        // Subscribe to audit logs for UI stream
+        AuditLogger.getInstance().addListener(event -> {
+            try {
+                Map<String, Object> data = event.getData();
+                String timestamp = TIME_FORMATTER.format(event.getTimestamp());
+                String shortId = event.getEventId().substring(0, 6);
+                String shortHash = event.getHash() != null ? event.getHash().substring(0, 6) : "......";
+
+                String logPrefix = String.format("[%s] [ID:%s] [Hash:%s]", timestamp, shortId, shortHash);
+
+                if (event.getEventType() == AuditEventType.TRADE_EXECUTED) {
+                    addLog(String.format("%s TRADE %s @ %s (%s)",
+                            logPrefix,
+                            event.getProduct(),
+                            data.get("price"),
+                            data.get("quantity")));
+                } else if (event.getEventType() == AuditEventType.ORDER_PLACED) {
+                    addLog(String.format("%s %s %s @ %s (%s)",
+                            logPrefix,
+                            data.get("side"),
+                            event.getProduct(),
+                            data.get("price"),
+                            data.get("quantity")));
+                }
+            } catch (Exception e) {
+                // Prevent listener errors from affecting main thread
+                System.err.println("Error processing audit event for UI: " + e.getMessage());
+            }
+        });
 
         app = Javalin.create(config -> {
             config.staticFiles.add("/public", Location.CLASSPATH);
@@ -72,6 +111,13 @@ public class WebDashboard {
             status.put("running", true);
             status.put("message", "System Operational");
             status.put("timestamp", System.currentTimeMillis());
+
+            // Add real latency metrics
+            double recentLatency = PerformanceMonitor.getInstance().getRecentAverageLatencyMs();
+            long totalOps = PerformanceMonitor.getInstance().getTotalOperations();
+            status.put("latencyMs", String.format("%.2f", recentLatency));
+            status.put("totalOperations", totalOps);
+
             ctx.contentType("application/json").result(gson.toJson(status));
         });
 
