@@ -470,7 +470,7 @@ h2 {
 }
 
 .field.disabled {
-  opacity: 0.48;
+  opacity: 0.72;
 }
 
 .financial-input {
@@ -535,6 +535,19 @@ h2 {
 .stepper button:hover {
   color: var(--text);
   background: var(--panel-hover);
+}
+
+.field.disabled .input-prefix,
+.field.disabled .stepper {
+  opacity: 0.45;
+}
+
+.field.disabled .stepper button {
+  cursor: not-allowed;
+}
+
+.field.disabled .financial-input input {
+  color: var(--muted);
 }
 
 .submit-order {
