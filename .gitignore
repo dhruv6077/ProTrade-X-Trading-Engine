@@ -1,0 +1,52 @@
+# Compiled class file
+*.class
+
+# Log file
+*.log
+logs/
+server.log
+
+# macOS metadata
+.DS_Store
+
+# Java/Maven build output
+target/
+dependency-reduced-pom.xml
+
+# Local benchmark/profiling artifacts
+diagnostics/
+*.jfr
+*.jfc
+jstack-*.txt
+
+# Local scratch/debug files
+debug.txt
+*_debug.py
+*_debug.txt
+brace_debug.py
+brace_tracker.py
+brace_tracker2.py
+inject_helpers.py
+publish_helpers.txt
+refactor_handlers.py
+mde_refactor.py
+update_engine.py
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+hs_err_pid*
+replay_pid*

@@ -1,0 +1,102 @@
+name: k6 Order Entry Stress Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Target base URL for the trading app"
+        required: false
+        default: "http://localhost:8080"
+      expected_status:
+        description: "Expected success HTTP status. Current /api/orders returns 202 for accepted orders."
+        required: false
+        default: "202"
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  k6-stress-test:
+    name: 500 VU /api/orders stress test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Configure these for your deployment:
+      # - BASE_URL: use http://localhost:8080 for CI-local Maven startup, or your staging URL.
+      # - EXPECTED_STATUS: set to 200 only if /api/orders returns 200 OK for accepted orders.
+      BASE_URL: ${{ github.event.inputs.base_url || 'http://localhost:8080' }}
+      EXPECTED_STATUS: ${{ github.event.inputs.expected_status || '202' }}
+      SYMBOLS: "AAPL,GOOGL,MSFT,TSLA,AMZN"
+      CLIENT_PREFIX: "K6_TRADER"
+      ORDER_RATE_SLEEP: "0.01"
+      RANDOMIZE_SIDE: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build Java application
+        run: mvn -B -DskipTests package
+
+      - name: Install k6
+        run: |
+          sudo gpg --batch --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          sudo gpg --batch --export C5AD17C747E3415A3642D57D77C6C491D6AC1D69 | sudo tee /usr/share/keyrings/k6-archive-keyring.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Start trading app
+        run: |
+          nohup mvn -B exec:java -Dexec.mainClass=Main > trading-app.log 2>&1 &
+          echo $! > trading-app.pid
+
+      - name: Wait for trading app health
+        run: |
+          for attempt in {1..90}; do
+            if curl --fail --silent "$BASE_URL/api/status" >/dev/null; then
+              echo "Trading app is ready at $BASE_URL"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Trading app did not become ready. Last logs:"
+          tail -200 trading-app.log || true
+          exit 1
+
+      - name: Start market simulation liquidity
+        run: |
+          curl --fail --silent --show-error -X POST "$BASE_URL/api/simulation/start"
+
+      - name: Run k6 stress test
+        run: |
+          k6 run \
+            -e BASE_URL="$BASE_URL" \
+            -e EXPECTED_STATUS="$EXPECTED_STATUS" \
+            -e SYMBOLS="$SYMBOLS" \
+            -e CLIENT_PREFIX="$CLIENT_PREFIX" \
+            -e ORDER_RATE_SLEEP="$ORDER_RATE_SLEEP" \
+            -e RANDOMIZE_SIDE="$RANDOMIZE_SIDE" \
+            tests/load/stress-test.js
+
+      - name: Upload trading app logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trading-app-log
+          path: trading-app.log
+          if-no-files-found: ignore
+
+      - name: Stop trading app
+        if: always()
+        run: |
+          if [ -f trading-app.pid ]; then
+            kill "$(cat trading-app.pid)" || true
+          fi

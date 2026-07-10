@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT_DIR"
+
+export ENABLE_LOAD_TEST_ADMIN="${ENABLE_LOAD_TEST_ADMIN:-true}"
+export SKIP_STATE_HYDRATION="${SKIP_STATE_HYDRATION:-true}"
+export CLEAN_ROOM_ORDERS="${CLEAN_ROOM_ORDERS:-false}"
+export RISK_OBJECT_POOL_SIZE="${RISK_OBJECT_POOL_SIZE:-262144}"
+export MDE_ORDER_PROJECTION_POOL_SIZE="${MDE_ORDER_PROJECTION_POOL_SIZE:-524288}"
+export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dlogback.configurationFile=src/logback-loadtest.xml"
+
+echo "Starting benchmark server"
+echo "  ENABLE_LOAD_TEST_ADMIN=${ENABLE_LOAD_TEST_ADMIN}"
+echo "  SKIP_STATE_HYDRATION=${SKIP_STATE_HYDRATION}"
+echo "  CLEAN_ROOM_ORDERS=${CLEAN_ROOM_ORDERS}"
+echo "  RISK_OBJECT_POOL_SIZE=${RISK_OBJECT_POOL_SIZE}"
+echo "  MDE_ORDER_PROJECTION_POOL_SIZE=${MDE_ORDER_PROJECTION_POOL_SIZE}"
+
+exec ./scripts/run-local.sh

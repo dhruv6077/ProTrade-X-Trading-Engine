@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ProTrade X ECN Console</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark">PX</div>
+          <div>
+            <p class="eyebrow">Event-driven exchange runtime</p>
+            <h1>ProTrade X ECN Console</h1>
+          </div>
+        </div>
+
+        <div class="header-console">
+          <label class="header-field">
+            <span>Symbol</span>
+            <select id="symbol-select"></select>
+          </label>
+          <label class="header-field client-field">
+            <span>Client</span>
+            <input id="client-id" value="WEB_TRADER" autocomplete="off" />
+          </label>
+          <div class="header-metric">
+            <span>Events</span>
+            <strong id="event-count">0</strong>
+          </div>
+          <div class="header-metric">
+            <span>Journal</span>
+            <strong id="journal-size">0</strong>
+          </div>
+          <div class="connection-pill">
+            <span class="status-dot" id="connection-dot"></span>
+            <span id="connection-text">Connecting</span>
+          </div>
+          <button class="icon-button" id="start-btn" title="Start simulation">Start</button>
+          <button class="icon-button danger" id="stop-btn" title="Stop simulation">Stop</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <section class="panel ladder-panel">
+          <div class="panel-header">
+            <div>
+              <h2>L2 Order Book</h2>
+              <p id="l2-asof">Waiting for market data</p>
+            </div>
+            <span class="stream-badge" id="l2-stream-status">SSE</span>
+          </div>
+          <div class="ladder-grid">
+            <div>
+              <div class="ladder-heading bid">Bid Depth</div>
+              <div class="ladder" id="bid-ladder"></div>
+            </div>
+            <div>
+              <div class="ladder-heading ask">Ask Depth</div>
+              <div class="ladder" id="ask-ladder"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel order-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Order Entry</h2>
+              <p>Routes directly through OrderGateway</p>
+            </div>
+          </div>
+          <form id="order-form" class="order-form">
+            <div class="side-toggle" role="group" aria-label="Order side">
+              <span class="side-indicator"></span>
+              <button type="button" class="side-button active bid" data-side="BUY">Buy</button>
+              <button type="button" class="side-button ask" data-side="SELL">Sell</button>
+            </div>
+            <label class="field">
+              <span>Order Type</span>
+              <select id="order-type">
+                <option value="LIMIT">Limit</option>
+                <option value="MARKET">Market</option>
+                <option value="IOC">IOC</option>
+                <option value="FOK">FOK</option>
+              </select>
+            </label>
+            <label class="field financial-field" id="price-field">
+              <span>Price</span>
+              <div class="financial-input">
+                <span class="input-prefix">$</span>
+                <input id="order-price" inputmode="decimal" value="100.00" placeholder="100.00" />
+                <div class="stepper" aria-label="Price stepper">
+                  <button type="button" data-step-target="order-price" data-step="0.01">+</button>
+                  <button type="button" data-step-target="order-price" data-step="-0.01">-</button>
+                </div>
+              </div>
+            </label>
+            <label class="field financial-field">
+              <span>Quantity</span>
+              <div class="financial-input">
+                <input id="order-qty" type="number" min="1" step="1" value="10" />
+                <div class="stepper" aria-label="Quantity stepper">
+                  <button type="button" data-step-target="order-qty" data-step="1">+</button>
+                  <button type="button" data-step-target="order-qty" data-step="-1">-</button>
+                </div>
+              </div>
+            </label>
+            <button class="submit-order" type="submit">Submit to Gateway</button>
+            <div class="form-message" id="form-message"></div>
+          </form>
+        </section>
+
+        <section class="panel account-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Account Stream</h2>
+              <p id="account-id-label">WEB_TRADER</p>
+            </div>
+          </div>
+          <div class="account-grid">
+            <div>
+              <span>Available Cash</span>
+              <strong id="available-cash">$0.00</strong>
+            </div>
+            <div>
+              <span>Reserved Cash</span>
+              <strong id="reserved-cash">$0.00</strong>
+            </div>
+          </div>
+          <div class="positions" id="positions"></div>
+        </section>
+
+        <section class="panel tape-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Time & Sales</h2>
+              <p>Latest bounded trade tape</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Side</th>
+                  <th>Price</th>
+                  <th>Qty</th>
+                </tr>
+              </thead>
+              <tbody id="trade-tape"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel diagnostics-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Pipeline Diagnostics</h2>
+              <p>Gateway -> Shard -> Dispatcher -> MDE</p>
+            </div>
+          </div>
+          <div class="diagnostic-grid">
+            <div class="chart-box">
+              <div class="chart-title">
+                <span>Latency Moving Average</span>
+                <strong id="latency-value">0 us</strong>
+              </div>
+              <canvas id="latency-chart" width="520" height="150"></canvas>
+            </div>
+            <div>
+              <div class="throughput" id="throughput"></div>
+              <div class="shards" id="shards"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

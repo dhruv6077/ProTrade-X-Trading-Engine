@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="AUDIT" level="OFF" additivity="false" />
+    <logger name="org.eclipse.jetty" level="ERROR" />
+    <logger name="io.javalin" level="ERROR" />
+    <logger name="io.netty" level="ERROR" />
+    <logger name="com.zaxxer.hikari" level="ERROR" />
+    <logger name="net.openhft.affinity" level="ERROR" />
+    <logger name="exchange" level="ERROR" />
+    <logger name="sim" level="ERROR" />
+    <logger name="persistence" level="ERROR" />
+    <logger name="Tradable" level="ERROR" />
+    <logger name="User" level="ERROR" />
+    <logger name="logging" level="ERROR" />
+
+    <root level="ERROR">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>

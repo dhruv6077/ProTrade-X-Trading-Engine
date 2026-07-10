@@ -1,0 +1,75 @@
+# ECN Host Latency Tuning (Linux)
+#
+# Apply these settings on dedicated bare-metal or pinned-CPU hosts running the Java ECN.
+# Review with your platform/SRE team before production rollout.
+#
+# ---------------------------------------------------------------------------
+# 1. Install sysctl configuration
+# ---------------------------------------------------------------------------
+# Save the block below to /etc/sysctl.d/99-ecn-hft.conf, then run:
+#
+#   sudo sysctl --system
+#   # or
+#   sudo sysctl -p /etc/sysctl.d/99-ecn-hft.conf
+#
+# ---------------------------------------------------------------------------
+# 2. Recommended sysctl.conf snippet
+# ---------------------------------------------------------------------------
+
+# --- Core socket buffer ceilings (bytes) ---
+# Raise kernel maxima so Netty SO_RCVBUF/SO_SNDBUF requests are honored.
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+
+# --- Per-protocol TCP auto-tuning (min, default, max) ---
+# Wider windows reduce stalls under burst market-data fanout.
+net.ipv4.tcp_rmem = 4096 87380 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+
+# --- Throughput / latency trade-offs ---
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_low_latency = 1
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_slow_start_after_idle = 0
+
+# --- Backlog / accept queue for Netty WebSocket ingress ---
+net.core.somaxconn = 4096
+net.core.netdev_max_backlog = 250000
+
+# --- Localhost / loopback proxy paths (FastAPI -> Java on same host) ---
+net.ipv4.tcp_tw_reuse = 1
+
+# ---------------------------------------------------------------------------
+# 3. CPU isolation (GRUB / systemd — manual, host-specific)
+# ---------------------------------------------------------------------------
+# Isolate cores 2-7 for the ECN JVM and pin Disruptor + matching shards via
+# OpenHFT Affinity (already wired in AffinityThreadFactory).
+#
+# Example kernel cmdline fragment:
+#   isolcpus=2-7 nohz_full=2-7 rcu_nocbs=2-7
+#
+# Disable irqbalance drift or route NIC interrupts away from isolated cores.
+#
+# ---------------------------------------------------------------------------
+# 4. Verify effective settings
+# ---------------------------------------------------------------------------
+#   sysctl net.core.rmem_max net.core.wmem_max
+#   sysctl net.ipv4.tcp_rmem net.ipv4.tcp_wmem
+#
+# ---------------------------------------------------------------------------
+# 5. Run JMH matching-engine benchmarks
+# ---------------------------------------------------------------------------
+#   mvn clean test -Pbenchmark
+#   java -jar target/benchmarks.jar MatchingEngineBenchmark -f 1
+#
+# ---------------------------------------------------------------------------
+# 6. Netty SO_BUSY_POLL note
+# ---------------------------------------------------------------------------
+# SO_BUSY_POLL is applied automatically on Linux when netty-transport-native-epoll
+# is available (see NettyWebSocketServer). Typical value: 50 microseconds.
+# Requires Linux kernel >= 3.11 and CAP_NET_ADMIN is NOT required for busy poll
+# socket options on established connections.
