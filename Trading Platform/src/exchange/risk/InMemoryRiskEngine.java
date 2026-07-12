@@ -187,7 +187,6 @@ public final class InMemoryRiskEngine implements RiskEngine {
         String clientId = command.clientId();
         String symbol = command.symbol();
         int symbolId = command.symbolId();
-        long signedQty = side == Side.BUY ? quantity : -quantity;
         ClientAccount account = account(clientId);
         long currentPosition = symbolId > 0 ? account.position(symbolId) : account.position(symbol);
         if (symbolId > 0 && currentPosition == 0L) {
@@ -196,8 +195,7 @@ public final class InMemoryRiskEngine implements RiskEngine {
                 account.setPosition(symbol, symbolId, currentPosition);
             }
         }
-        long projectedPosition = currentPosition + signedQty;
-        if (Math.abs(projectedPosition) > profile.maxPosition()) {
+        if (RiskMath.exceedsPositionLimit(currentPosition, side, quantity, profile.maxPosition())) {
             return RiskDecision.PROJECTED_POSITION_LIMIT;
         }
 
@@ -233,7 +231,7 @@ public final class InMemoryRiskEngine implements RiskEngine {
         if (reserveUnitCents < 0) {
             return -1;
         }
-        return Math.multiplyExact(reserveUnitCents, quantity(order));
+        return RiskMath.multiplyPositiveOrMax(reserveUnitCents, quantity(order));
     }
 
     private long reserveUnitCents(OrderCommand order) {
@@ -251,7 +249,7 @@ public final class InMemoryRiskEngine implements RiskEngine {
     }
 
     private long applyCollar(long referenceCents) {
-        return Math.multiplyExact(referenceCents, 10_000L + marketCollarBps) / 10_000L;
+        return RiskMath.multiplyPositiveOrMax(referenceCents, 10_000L + marketCollarBps) / 10_000L;
     }
 
     private long referencePriceCents(OrderCommand command) {

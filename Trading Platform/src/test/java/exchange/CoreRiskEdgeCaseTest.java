@@ -50,6 +50,41 @@ class CoreRiskEdgeCaseTest {
     }
 
     @Test
+    void overflowingNotionalIsRejectedDeterministicallyWithoutEscapingRiskStage() throws Exception {
+        exchange = ExchangeTestSupport.newExchange(Set.of("AAPL"));
+
+        List<ExchangeEvent> events = exchange.gateway().submit(ExchangeTestSupport.limit(
+                "B-OVERFLOW",
+                "BUYER1",
+                "AAPL",
+                Side.BUY,
+                PriceFactory.makePrice(Long.MAX_VALUE / 2L + 1L),
+                3));
+
+        OrderRejected rejected = assertInstanceOf(OrderRejected.class, events.get(0));
+        assertEquals(RejectReason.RISK_NOTIONAL_LIMIT, rejected.reason());
+        assertEquals(0, exchange.riskEngine().account("BUYER1").reservedCashCents());
+    }
+
+    @Test
+    void projectedPositionArithmeticCannotWrapAroundTheLongBoundary() throws Exception {
+        exchange = ExchangeTestSupport.newExchange(Set.of("AAPL"));
+        exchange.riskEngine().setPosition("BUYER1", "AAPL", Long.MAX_VALUE);
+
+        List<ExchangeEvent> events = exchange.gateway().submit(ExchangeTestSupport.limit(
+                "B-POS-OVERFLOW",
+                "BUYER1",
+                "AAPL",
+                Side.BUY,
+                PriceFactory.makePrice("$1.00"),
+                1));
+
+        OrderRejected rejected = assertInstanceOf(OrderRejected.class, events.get(0));
+        assertEquals(RejectReason.RISK_POSITION_LIMIT, rejected.reason());
+        assertEquals(0, exchange.riskEngine().account("BUYER1").reservedCashCents());
+    }
+
+    @Test
     void preTradeRiskRejectsLimitOrdersOutsideConfiguredPriceBand() throws Exception {
         exchange = ExchangeTestSupport.newExchange(Set.of("AAPL"));
         exchange.riskEngine().setProfile("BUYER1", new RiskProfile(1_000_000_000L, 1_000_000,

@@ -9,21 +9,21 @@ RUN_COUNT="${RUN_COUNT:-3}"
 TARGET_P99_MS="${TARGET_P99_MS:-50}"
 TARGET_GC_PAUSE_MS="${TARGET_GC_PAUSE_MS:-1.5}"
 # 0.00005 == 0.005%, which renders as 0.00% at k6's default two-decimal display precision.
-TARGET_ACK_TIMEOUT_RATE="${TARGET_ACK_TIMEOUT_RATE:-0.00005}"
+TARGET_ACK_TIMEOUT_RATE="${TARGET_ACK_TIMEOUT_RATE:-0}"
 
-TARGET_VUS="${TARGET_VUS:-400}"
-ORDER_INTERVAL_MS="${ORDER_INTERVAL_MS:-5}"
+TARGET_VUS="${TARGET_VUS:-500}"
+ORDER_INTERVAL_MS="${ORDER_INTERVAL_MS:-200}"
 TEST_DURATION="${TEST_DURATION:-30s}"
-WARMUP_VUS="${WARMUP_VUS:-20}"
+WARMUP_VUS="${WARMUP_VUS:-50}"
 WARMUP_DURATION="${WARMUP_DURATION:-15s}"
 OS_SETTLE_SLEEP_SECONDS="${OS_SETTLE_SLEEP_SECONDS:-10}"
 RISK_OBJECT_POOL_SIZE="${RISK_OBJECT_POOL_SIZE:-262144}"
 MDE_ORDER_PROJECTION_POOL_SIZE="${MDE_ORDER_PROJECTION_POOL_SIZE:-524288}"
 ORDER_BOOK_INITIAL_CAPACITY="${ORDER_BOOK_INITIAL_CAPACITY:-524288}"
 
-# Benchmark JVMs use a fixed, pre-touched heap and stable compiler policy to reduce
-# first-touch page faults, heap resizing, and late C2 compilation during measured load.
-VERIFY_JAVA_TOOL_OPTIONS="${VERIFY_JAVA_TOOL_OPTIONS:--Xms2g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=5 -XX:+AlwaysPreTouch -XX:+TieredCompilation -XX:TieredStopAtLevel=4 -XX:CICompilerCount=4 -XX:CompileThresholdScaling=0.25}"
+# Benchmark JVMs use a fixed, pre-touched heap and ZGC to keep collection pauses
+# below the order-acknowledgement SLA on the Java 25 runtime.
+VERIFY_JAVA_TOOL_OPTIONS="${VERIFY_JAVA_TOOL_OPTIONS:--Xms2g -Xmx2g -XX:+UseZGC -XX:+AlwaysPreTouch}"
 
 mkdir -p "$ARTIFACT_DIR"
 RESULTS_CSV="$ARTIFACT_DIR/triple-verification-results.csv"

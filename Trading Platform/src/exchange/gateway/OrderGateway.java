@@ -4,10 +4,10 @@ import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.InsufficientCapacityException;
 import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.TimeoutException;
-import com.lmax.disruptor.YieldingWaitStrategy;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 import exchange.core.AffinityThreadFactory;
+import exchange.core.DisruptorWaitStrategies;
 import exchange.core.FailSafeDisruptorExceptionHandler;
 import exchange.core.MatchingEngine;
 import exchange.core.Sequencer;
@@ -384,7 +384,7 @@ public final class OrderGateway implements AutoCloseable {
                 RISK_QUEUE_CAPACITY,
                 new AffinityThreadFactory("account-risk-core"),
                 ProducerType.MULTI,
-                new YieldingWaitStrategy());
+                DisruptorWaitStrategies.latencySensitive());
         disruptor.setDefaultExceptionHandler(new FailSafeDisruptorExceptionHandler<>("account-risk-core",
                 (event, sequence, error) -> event.complete(EMPTY_EVENTS, error, sequence)));
         disruptor.handleEventsWith(new StageOneRiskHandler());
@@ -540,7 +540,7 @@ public final class OrderGateway implements AutoCloseable {
                     SHARD_RING_CAPACITY,
                     new AffinityThreadFactory("matching-" + symbolId + "-" + symbol),
                     ProducerType.SINGLE,
-                    new YieldingWaitStrategy());
+                    DisruptorWaitStrategies.latencySensitive());
             this.disruptor.setDefaultExceptionHandler(new FailSafeDisruptorExceptionHandler<>("matching-shard",
                     (event, sequence, error) -> event.complete(EMPTY_EVENTS, error, sequence)));
             this.disruptor.handleEventsWith(new ShardEventHandler());

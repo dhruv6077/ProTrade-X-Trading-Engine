@@ -3,11 +3,11 @@ package exchange.dispatch;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.ExceptionHandler;
 import com.lmax.disruptor.TimeoutException;
-import com.lmax.disruptor.YieldingWaitStrategy;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.EventHandlerGroup;
 import com.lmax.disruptor.dsl.ProducerType;
 import exchange.core.AffinityThreadFactory;
+import exchange.core.DisruptorWaitStrategies;
 import exchange.core.FailSafeDisruptorExceptionHandler;
 import exchange.model.ExchangeEvent;
 import org.slf4j.Logger;
@@ -52,7 +52,7 @@ public final class InMemoryEventDispatcher implements EventDispatcher {
         AffinityThreadFactory threadFactory = new AffinityThreadFactory("exchange-event-disruptor");
 
         disruptor = new Disruptor<>(ExchangeEventFactory.INSTANCE, ringBufferSize, threadFactory, ProducerType.MULTI,
-                new YieldingWaitStrategy());
+                DisruptorWaitStrategies.latencySensitive());
         disruptor.setDefaultExceptionHandler(new FailSafeDisruptorExceptionHandler<>("exchange-event-dispatcher"));
 
         ArrayList<EventHandler<RingBufferEvent>> handlers = new ArrayList<>(primaryHandlers.size() + 1);

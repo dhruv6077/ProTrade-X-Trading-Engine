@@ -11,4 +11,4 @@ echo "HTTP dashboard/API: http://localhost:${JETTY_PORT}"
 echo "WebSocket orders:  ws://localhost:9090/ws/orders"
 echo "WebSocket market:  ws://localhost:9090/ws/market-data"
 
-mvn -q -DskipTests compile exec:java -Dexec.mainClass=Main
+exec mvn -q -DskipTests compile exec:java -Dexec.mainClass=Main

@@ -213,6 +213,7 @@
                 <version>3.2.5</version>
                 <configuration>
                     <argLine>
+                        --enable-native-access=ALL-UNNAMED
                         --sun-misc-unsafe-memory-access=allow
                         -Xshare:off
                         -XX:+EnableDynamicAgentLoading

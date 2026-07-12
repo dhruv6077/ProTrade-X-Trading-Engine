@@ -37,7 +37,7 @@ public final class PreTradeRiskGuard {
 
         long unitPriceCents = price == null ? -1L : price.getCents();
         if (unitPriceCents > 0L) {
-            long notionalCents = Math.multiplyExact(unitPriceCents, quantity);
+            long notionalCents = RiskMath.multiplyPositiveOrMax(unitPriceCents, quantity);
             if (notionalCents > profile.maxOrderNotionalCents()) {
                 return RiskDecision.ORDER_NOTIONAL_LIMIT;
             }
@@ -56,8 +56,10 @@ public final class PreTradeRiskGuard {
         if (maxDeviationBps <= 0) {
             return false;
         }
-        long upper = Math.multiplyExact(referenceCents, 10_000L + maxDeviationBps) / 10_000L;
-        long lower = Math.multiplyExact(referenceCents, Math.max(0L, 10_000L - maxDeviationBps)) / 10_000L;
+        long upper = RiskMath.multiplyPositiveOrMax(referenceCents, 10_000L + maxDeviationBps) / 10_000L;
+        long lower = RiskMath.multiplyPositiveOrMax(
+                referenceCents,
+                Math.max(0L, 10_000L - maxDeviationBps)) / 10_000L;
         return side == Side.BUY ? priceCents > upper : priceCents < lower;
     }
 

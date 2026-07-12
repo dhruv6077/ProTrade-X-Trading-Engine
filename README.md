@@ -2,7 +2,7 @@
 
 ProTrade X, also referred to as Vision Trader in the runtime modules, is an ultra-low-latency ECN-style electronic trading exchange core written in Java. The project evolved from a traditional order book simulator into a deterministic, event-driven matching venue with a mechanically sympathetic execution pipeline.
 
-The current architecture focuses on strict sequencing, cache-friendly data layouts, bounded object reuse, pre-trade risk serialization, deterministic replay, and low-jitter WebSocket order ingress. The latest validated milestone sustained a 500 virtual-user WebSocket order-entry profile with **843,200 orders fully acknowledged**, **0% drops/timeouts**, and a **28ms p99 ACK latency**.
+The current architecture focuses on strict sequencing, cache-friendly data layouts, bounded object reuse, pre-trade risk serialization, deterministic replay, and low-jitter WebSocket order ingress. The latest three-run verification sustained **500 concurrent WebSocket users** with **295,294 accepted order acknowledgements**, **zero connection failures**, **zero ACK timeouts**, and a **31ms worst-run p99** against a strict sub-50ms SLA.
 
 ## Executive Summary
 
@@ -35,17 +35,19 @@ flowchart LR
 
 ## System Dashboard & Telemetry
 
-The runtime includes a Javalin-served operational dashboard for inspecting venue state while the Netty WebSocket order path and event-driven projections are under load. Drop screenshots into `Trading Platform/docs/assets/` using the filenames below to render this section on GitHub.
+The Javalin operational console renders state produced by the same matching, clearing, and market-data services used by the WebSocket execution path. It does not maintain a separate simulated account or synthetic browser-side order book.
 
-| Exchange Workstation | Observability Plane |
-| --- | --- |
-| <img src="Trading%20Platform/docs/assets/dashboard-l2-depth.png" alt="ProTrade X dashboard showing L2 depth, order entry, account state, and trade tape" width="100%"> | <img src="Trading%20Platform/docs/assets/grafana-latency-telemetry.png" alt="ProTrade X Grafana telemetry showing latency and transport health" width="100%"> |
-| Real-time L2 order book, trade tape, order-entry controls, and account projections driven by the event-dispatch and market-data engine boundaries. | Prometheus/Grafana telemetry surface for validating WebSocket ACK latency, transport stability, throughput, and JVM behavior during benchmark profiles. |
+<p align="center">
+  <img src="Trading%20Platform/docs/assets/dashboard-l2-depth.png" alt="ProTrade X ECN console showing live L2 depth and account state" width="100%">
+</p>
 
-| Matching & Pipeline Diagnostics |
-| --- |
-| <img src="Trading%20Platform/docs/assets/pipeline-diagnostics.png" alt="ProTrade X pipeline diagnostics showing shard health and latency metrics" width="100%"> |
-| Runtime diagnostics tying symbol-shard health, queue depth, and latency reporting back to the single-writer execution model and replayable command stream. |
+<p align="center"><em>Live L2 depth and account projections sourced from the event-driven exchange runtime.</em></p>
+
+<p align="center">
+  <img src="Trading%20Platform/docs/assets/pipeline-diagnostics.png" alt="ProTrade X pipeline diagnostics showing latency and symbol queue depth" width="100%">
+</p>
+
+<p align="center"><em>Gateway-to-shard-to-dispatch telemetry with per-symbol queue depth and a rolling latency view.</em></p>
 
 ### Two-Stage Execution Pipeline
 
@@ -90,12 +92,12 @@ Stage 2 is designed around the single-writer principle for each symbol book. Mat
 
 ## Low-Latency & Zero-Allocation Design Principles
 
-The 28ms p99 WebSocket order-path benchmark was achieved by progressively removing GC-heavy structures from the active order lifecycle.
+The sub-50ms WebSocket order-path result was achieved by progressively removing GC-heavy structures and blocking handoffs from the active order lifecycle.
 
 | Principle | Applied Technique |
 | --- | --- |
 | Mechanical Sympathy | Prefer cache-friendly primitive fields and stable memory layouts over object graphs. |
-| No Hot-Path `new` Calls | Mutate primitive quantities such as `leavesQty` and `cumQty` in place instead of allocating fresh `OrderState` or `OrderAccepted` objects per order. |
+| Allocation-Disciplined Hot Path | Mutate primitive quantities such as `leavesQty` and `cumQty` in place and reuse bounded carriers instead of allocating fresh lifecycle objects at every transition. |
 | Flyweight Pattern | Reuse mutable command/event carriers across staged processing boundaries rather than creating defensive immutable snapshots for every transition. |
 | Lock-Free Object Pooling | Use bounded array-backed recycling for risk structures such as `CashReservation` and `RestingRiskOrder` to avoid repeated `HashMap$Node` and short-lived state allocations. |
 | TLAB Fragmentation Mitigation | Remove allocation spikes discovered through JFR allocation profiling, especially in parsing, projection, risk reservation, and event formatting. |
@@ -105,20 +107,16 @@ The 28ms p99 WebSocket order-path benchmark was achieved by progressively removi
 
 ## Verified Benchmark
 
-Profile: 500 VU WebSocket order-entry stress test using `tests/load/ws-order-control-test.js`.
+Profile: three consecutive 500-VU Netty WebSocket order-entry runs using terminal IOC commands, a 200ms per-VU submission interval, and a 30-second saturation hold. Latency is measured from client send to correlated execution-report ACK.
 
-| Metric | Result |
-| --- | ---: |
-| Accepted order p99 | 28ms |
-| Overall stress p99 | 28ms |
-| Median ACK latency | 4ms |
-| p95 ACK latency | 10ms |
-| Max ACK latency | 120ms |
-| WebSocket connection failures | 0% |
-| ACK timeouts | 0% |
-| Unmatched messages | 0% |
-| Orders sent | 843,200 |
-| Orders acknowledged | 843,200 |
+| Run | Accepted p95 | Accepted p99 | Accepted ACKs | ACK timeouts | Connection failures | Total GC pause |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 5ms | 18ms | 98,294 | 0% | 0% | 0.119ms |
+| 2 | 5ms | 10ms | 98,500 | 0% | 0% | 0.166ms |
+| 3 | 6ms | 31ms | 98,500 | 0% | 0% | 0.154ms |
+| **Aggregate** | **5.33ms avg** | **19.67ms avg / 31ms worst** | **295,294** | **0%** | **0%** | **0.146ms avg** |
+
+These numbers describe the calibrated benchmark profile above, not an unconditional production throughput guarantee. The WebSocket path passed the repository's `<50ms` accepted-ACK p99 threshold in all three runs.
 
 Full report: [`Trading Platform/docs/BENCHMARK_REPORT.md`](Trading%20Platform/docs/BENCHMARK_REPORT.md)
 
@@ -210,18 +208,18 @@ Install k6:
 brew install k6
 ```
 
-Start the benchmark server:
+Run the complete three-pass verification, including Maven tests and JFR extraction:
 
 ```bash
 cd "Trading Platform"
-./scripts/run-benchmark-server.sh
+./scripts/verify-all.sh
 ```
 
-In another terminal:
+For one profiled benchmark pass:
 
 ```bash
 cd "Trading Platform"
-./scripts/run-ws-load-test.sh
+./scripts/run-profile.sh
 ```
 
 The benchmark runner preallocates larger risk and market-data pools:

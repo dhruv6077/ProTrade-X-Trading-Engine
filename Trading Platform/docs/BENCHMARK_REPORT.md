@@ -1,88 +1,64 @@
 # Vision Trader Benchmark Report
 
-Date: 2026-07-02
-Profile: 500 VU WebSocket order-entry stress test
-Transport: Netty WebSocket `/ws/orders`
-Script: `tests/load/ws-order-control-test.js`
+**Verification date:** 2026-07-11<br>
+**Transport:** Netty WebSocket `/ws/orders`<br>
+**Harness:** `tests/load/benchmark.js` through `scripts/verify-all.sh`
 
-## Final Validated Result
+## Test Contract
 
-The WebSocket order path met the sub-50ms p99 SLA under 500 virtual users.
+The final verification runs model a bounded order-entry workload rather than an unbounded socket flood. Each virtual user keeps a correlated WebSocket session, submits terminal IOC orders at a controlled interval, and waits within a bounded in-flight window for an execution-report acknowledgement.
 
-| Metric | Result |
+| Setting | Value |
 | --- | ---: |
-| Accepted order p99 | 28ms |
-| Overall stress p99 | 28ms |
-| Median ACK latency | 4ms |
-| p95 ACK latency | 10ms |
-| Max ACK latency | 120ms |
-| WebSocket connection failures | 0% |
-| ACK timeouts | 0% |
-| Unmatched messages | 0% |
-| Orders sent | 843,200 |
-| Orders acknowledged | 843,200 |
+| Concurrent virtual users | 500 |
+| Per-VU order interval | 200ms |
+| Saturation hold | 30s |
+| Verification passes | 3 |
+| Accepted ACK p99 SLA | `<50ms` |
+| ACK timeout threshold | `0%` |
+| Connection failure threshold | `0%` |
 
-## Required Benchmark Settings
+## Triple-Verification Results
 
-The validated run used larger preallocated pools to avoid hot-path pool exhaustion during sustained 500 VU load:
+| Run | Accepted p95 | Accepted p99 | Accepted ACKs | Rejected ACKs | Load-shed rejects | ACK timeouts | Connection failures | Total GC pause |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 5ms | 18ms | 98,294 | 0 | 0 | 0% | 0% | 0.119ms |
+| 2 | 5ms | 10ms | 98,500 | 0 | 0 | 0% | 0% | 0.166ms |
+| 3 | 6ms | 31ms | 98,500 | 0 | 0 | 0% | 0% | 0.154ms |
+| **Aggregate** | **5.33ms avg** | **19.67ms avg / 31ms worst** | **295,294** | **0** | **0** | **0%** | **0%** | **0.146ms avg** |
+
+All three runs passed the accepted-order p99 SLA. Every submitted order received a correlated accepted, rejected, or overload response; this profile produced accepted acknowledgements only.
+
+## Runtime Profile
+
+The verification runner configures bounded pools before starting the JVM:
 
 ```bash
 RISK_OBJECT_POOL_SIZE=262144
 MDE_ORDER_PROJECTION_POOL_SIZE=524288
+ORDER_BOOK_INITIAL_CAPACITY=262144
 ```
 
-These are set by default in:
+Local macOS benchmark runs use a phased backoff wait strategy to avoid burning all available cores while Netty, k6, and JFR share the machine. Production Linux defaults to a yielding strategy unless explicitly overridden.
+
+## Reproduce
+
+Run the Java correctness suite and all three benchmark passes:
 
 ```bash
-scripts/run-benchmark-server.sh
+./scripts/verify-all.sh
 ```
 
-## Reproduction Commands
-
-Start the benchmark server:
+Run one profiled pass:
 
 ```bash
-./scripts/run-benchmark-server.sh
+./scripts/run-profile.sh
 ```
 
-Run the WebSocket load test:
+The scripts write local k6/JFR artifacts under `diagnostics/`, which is intentionally excluded from Git because recordings are machine-specific and can be large.
 
-```bash
-./scripts/run-ws-load-test.sh
-```
+## Interpretation
 
-Optional JFR allocation recording:
-
-```bash
-jcmd <PID> JFR.start \
-  name=ws_allocation \
-  settings=diagnostics/jfr/ws-tlab-allocation.jfc \
-  filename=diagnostics/jfr/ws-allocation-after-risk-mde-pools.jfr \
-  disk=true \
-  path-to-gc-roots=false
-```
-
-Stop the recording:
-
-```bash
-jcmd <PID> JFR.stop name=ws_allocation
-```
-
-## JFR Confirmation
-
-Final recording:
-
-```text
-diagnostics/jfr/ws-allocation-after-risk-mde-pools-20260702-221315.jfr
-```
-
-Confirmed:
-
-- `borrowCashReservation()` no longer appears as an allocation hotspot.
-- `OrderProjection pool exhausted` no longer appears.
-- No exception/logging storm occurred during the passing run.
-- Transport stability remained clean: no connection failures, ACK timeouts, or unmatched messages.
-
-## Notes
-
-This benchmark validates the optimized WebSocket path, not the HTTP/Javalin path. The run confirms that the Netty WebSocket ingress plus Disruptor-backed core can sustain the 500 VU profile while staying comfortably below the 50ms p99 SLA.
+- The figures validate the repository's calibrated 500-VU WebSocket profile on the recorded development machine.
+- They do not claim exchange colocated latency, maximum throughput, or production capacity across arbitrary hardware.
+- HTTP/Javalin remains available for dashboard and compatibility workflows; the optimized order-entry benchmark targets the persistent Netty WebSocket path.

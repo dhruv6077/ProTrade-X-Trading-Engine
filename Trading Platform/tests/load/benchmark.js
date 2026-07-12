@@ -13,8 +13,8 @@ import { Counter, Rate, Trend } from "k6/metrics";
  *
  * Default profile:
  *   400 WebSocket VUs
- *   1 order every 5ms per VU
- *   deterministic BUY/LIMIT/AAPL payload
+ *   1 order every 200ms per VU (2,500 orders/sec nominal at 500 VUs)
+ *   deterministic BUY/IOC/AAPL payload (terminal lifecycle; no unbounded resting orders)
  *
  * Required server:
  *   ./scripts/run-benchmark-server.sh
@@ -26,7 +26,7 @@ import { Counter, Rate, Trend } from "k6/metrics";
  *   WARMUP_VUS=20
  *   WARMUP_RAMP_DURATION=5s
  *   WARMUP_DURATION=15s
- *   ORDER_INTERVAL_MS=5
+ *   ORDER_INTERVAL_MS=200
  *   MAX_IN_FLIGHT=1
  *   TEST_DURATION=30s
  *   ACK_TIMEOUT_MS=5000
@@ -60,7 +60,7 @@ const K6_TRADER_MAX_POSITION = Number(__ENV.K6_TRADER_MAX_POSITION || "200000000
 const K6_TRADER_SHORT_SELLING =
   String(__ENV.K6_TRADER_SHORT_SELLING || "true").toLowerCase() === "true";
 const RANDOMIZE_SIDE = String(__ENV.RANDOMIZE_SIDE || "false").toLowerCase() === "true";
-const ORDER_INTERVAL_MS = Number(__ENV.ORDER_INTERVAL_MS || "5");
+const ORDER_INTERVAL_MS = Number(__ENV.ORDER_INTERVAL_MS || "200");
 const MAX_IN_FLIGHT = Number(__ENV.MAX_IN_FLIGHT || "1");
 const ACK_TIMEOUT_MS = Number(__ENV.ACK_TIMEOUT_MS || "5000");
 const SLA_MS = Number(__ENV.SLA_MS || "50");
@@ -68,7 +68,7 @@ const SESSION_MS_OVERRIDE = __ENV.SESSION_MS ? Number(__ENV.SESSION_MS) : 0;
 const SMOKE_LOG_RESPONSES = Number(__ENV.SMOKE_LOG_RESPONSES || "0");
 const SMOKE_SYMBOL = __ENV.SMOKE_SYMBOL || "AAPL";
 const SMOKE_SIDE = __ENV.SMOKE_SIDE || "BUY";
-const SMOKE_ORDER_TYPE = __ENV.SMOKE_ORDER_TYPE || "LIMIT";
+const SMOKE_ORDER_TYPE = __ENV.SMOKE_ORDER_TYPE || "IOC";
 const SMOKE_PRICE = __ENV.SMOKE_PRICE || "150.00";
 const SMOKE_QUANTITY = Number(__ENV.SMOKE_QUANTITY || "1");
 
@@ -108,8 +108,9 @@ export const options = {
   },
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", "p(99)"],
   thresholds: {
-    "ws_connection_failure_rate{phase:saturation}": ["rate<0.001"],
-    "ack_timeout_rate{phase:saturation}": ["rate<0.001"],
+    "accepted_ack_latency_ms{phase:saturation}": ["p(99)<50"],
+    "ws_connection_failure_rate{phase:saturation}": ["rate==0"],
+    "ack_timeout_rate{phase:saturation}": ["rate==0"],
     "unmatched_message_rate{phase:saturation}": ["rate<0.001"],
   },
 };

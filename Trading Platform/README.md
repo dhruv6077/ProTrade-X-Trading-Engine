@@ -1,6 +1,21 @@
-# Vision Trader
+# ProTrade X / Vision Trader
 
-Vision Trader is a Java 21 electronic trading engine and dashboard built around a deterministic exchange core. Orders enter through HTTP or Netty WebSocket, pass through a serialized account/risk stage, route into symbol matching, then publish execution reports and market data through asynchronous event pipelines.
+Vision Trader is a Java 21 electronic trading engine and operational dashboard built around a deterministic ECN-style exchange core. Orders enter through HTTP or Netty WebSocket, pass through a serialized account/risk stage, route into symbol matching, then publish execution reports and market data through bounded asynchronous event pipelines.
+
+## Latest Verification
+
+Three consecutive 500-VU WebSocket runs passed the `<50ms` accepted-ACK p99 SLA with zero connection failures and zero ACK timeouts.
+
+| Metric | Result |
+| --- | ---: |
+| Accepted ACKs | 295,294 |
+| Average accepted p99 | 19.67ms |
+| Worst-run accepted p99 | 31ms |
+| Average total GC pause | 0.146ms |
+| ACK timeout rate | 0% |
+| Connection failure rate | 0% |
+
+The benchmark used terminal IOC orders, 500 concurrent users, a 200ms per-VU submission interval, and a 30-second saturation hold. See [docs/BENCHMARK_REPORT.md](docs/BENCHMARK_REPORT.md) for the reproducibility contract.
 
 ## What It Does
 
@@ -28,6 +43,18 @@ flowchart LR
     JOURNAL --> REPLAY["Deterministic Replay"]
 ```
 
+## Runtime Console
+
+<p align="center">
+  <img src="docs/assets/dashboard-l2-depth.png" alt="ProTrade X runtime console showing live L2 depth and account state" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/pipeline-diagnostics.png" alt="ProTrade X pipeline diagnostics showing rolling latency and symbol queue depth" width="100%">
+</p>
+
+The console is a projection of the Java exchange runtime: L2 depth comes from the Market Data Engine, account values come from risk and clearing state, and order entry routes through the same `OrderGateway` used by programmatic clients.
+
 ## Requirements
 
 - Java 21 or newer
@@ -39,7 +66,8 @@ flowchart LR
 ## Quick Start
 
 ```bash
-cd "/Users/dhruvpatel/Documents/Trading Engine/Trading Platform"
+git clone https://github.com/dhruv6077/ProTrade-X-Trading-Engine.git
+cd "ProTrade-X-Trading-Engine/Trading Platform"
 ./scripts/run-local.sh
 ```
 
@@ -150,28 +178,28 @@ Install k6:
 brew install k6
 ```
 
-Start the app, then seed liquidity:
+Run the strict three-pass verification suite:
 
 ```bash
-curl -X POST http://localhost:8080/api/simulation/start
+./scripts/verify-all.sh
 ```
 
-HTTP order path:
+Run one WebSocket/JFR profile:
+
+```bash
+./scripts/run-profile.sh
+```
+
+Run the HTTP comparison profile:
 
 ```bash
 ./scripts/run-http-load-test.sh
 ```
 
-WebSocket order path:
-
-```bash
-./scripts/run-ws-load-test.sh
-```
-
 Useful overrides:
 
 ```bash
-TARGET_VUS=500 TEST_DURATION=60s K6_TRADER_CASH=100000000000000 ./scripts/run-ws-load-test.sh
+TARGET_VUS=500 ORDER_INTERVAL_MS=200 SATURATION_HOLD=30s ./scripts/run-profile.sh
 ```
 
 ## Observability

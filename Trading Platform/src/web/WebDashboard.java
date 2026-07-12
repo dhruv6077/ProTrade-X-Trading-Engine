@@ -34,6 +34,8 @@ import exchange.risk.RiskProfile;
 import exchange.telemetry.LatencyTelemetry;
 import exchange.ws.NettyWebSocketServer;
 import io.javalin.Javalin;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import java.time.Duration;
@@ -757,32 +759,70 @@ public class WebDashboard {
     private static final class DashboardTelemetry implements RingBufferEventListener {
         private final ConcurrentHashMap<String, AtomicLong> totalOrdersBySymbol = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, AtomicLong> lastOrdersBySymbol = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Counter> acceptedCountersBySymbol = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Counter> rejectedCountersBySymbol = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Timer> latencyTimersBySymbol = new ConcurrentHashMap<>();
         private final ArrayDeque<Long> latencyNanos = new ArrayDeque<>(LATENCY_LIMIT);
 
         @Override
         public synchronized void onRingBufferEvent(RingBufferEvent event, long sequence, boolean endOfBatch) {
+            String symbol = event.getSymbol();
             if (event.getEventType() == RingBufferEvent.EventType.REJECTED) {
-                if (prometheusRegistry != null) {
-                    prometheusRegistry.counter("orders_rejected_total", "symbol", event.getSymbol()).increment();
+                Counter counter = meterCounter(rejectedCountersBySymbol, "orders_rejected_total", symbol);
+                if (counter != null) {
+                    counter.increment();
                 }
                 return;
             }
-            if (prometheusRegistry != null) {
-                prometheusRegistry.counter("orders_accepted_total", "symbol", event.getSymbol()).increment();
+
+            if (event.getEventType() == RingBufferEvent.EventType.ACCEPTED) {
+                Counter counter = meterCounter(acceptedCountersBySymbol, "orders_accepted_total", symbol);
+                if (counter != null) {
+                    counter.increment();
+                }
+                totalOrdersBySymbol.computeIfAbsent(symbol, ignored -> new AtomicLong()).incrementAndGet();
             }
-            totalOrdersBySymbol.computeIfAbsent(event.getSymbol(), ignored -> new AtomicLong()).incrementAndGet();
+
             if (event.getEventType() == RingBufferEvent.EventType.EXECUTED
                     && event.getEventEmittedNanos() >= event.getEngineInNanos()) {
                 long lat = event.getEventEmittedNanos() - event.getEngineInNanos();
                 latencyNanos.addLast(lat);
-                if (prometheusRegistry != null) {
-                    prometheusRegistry.timer("order_latency_seconds", "symbol", event.getSymbol())
-                            .record(Duration.ofNanos(lat));
+                Timer timer = meterTimer(symbol);
+                if (timer != null) {
+                    timer.record(lat, java.util.concurrent.TimeUnit.NANOSECONDS);
                 }
                 while (latencyNanos.size() > LATENCY_LIMIT) {
                     latencyNanos.removeFirst();
                 }
             }
+        }
+
+        private Counter meterCounter(ConcurrentHashMap<String, Counter> counters, String name, String symbol) {
+            PrometheusMeterRegistry registry = prometheusRegistry;
+            if (registry == null || symbol == null) {
+                return null;
+            }
+            Counter existing = counters.get(symbol);
+            if (existing != null) {
+                return existing;
+            }
+            Counter created = registry.counter(name, "symbol", symbol);
+            Counter raced = counters.putIfAbsent(symbol, created);
+            return raced == null ? created : raced;
+        }
+
+        private Timer meterTimer(String symbol) {
+            PrometheusMeterRegistry registry = prometheusRegistry;
+            if (registry == null || symbol == null) {
+                return null;
+            }
+            Timer existing = latencyTimersBySymbol.get(symbol);
+            if (existing != null) {
+                return existing;
+            }
+            Timer created = registry.timer("order_latency_seconds", "symbol", symbol);
+            Timer raced = latencyTimersBySymbol.putIfAbsent(symbol, created);
+            return raced == null ? created : raced;
         }
 
         private synchronized Map<String, Long> throughputPerSecond() {
