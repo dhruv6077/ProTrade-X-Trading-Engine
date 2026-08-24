@@ -80,14 +80,8 @@ document.addEventListener("DOMContentLoaded", () => {
       button.addEventListener("click", () => stepFinancialInput(button));
     });
     els.orderType.addEventListener("change", updatePriceField);
-    els.orderPrice.addEventListener("input", () => {
-      if (els.orderType.value !== "MARKET") {
-        els.orderPrice.dataset.limitPrice = els.orderPrice.value;
-      }
-      validatePriceTick();
-    });
+    els.orderPrice.addEventListener("input", validatePriceTick);
     els.orderForm.addEventListener("submit", submitOrder);
-    updatePriceField();
   }
 
   async function loadSymbols() {
@@ -335,15 +329,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const isMarket = els.orderType.value === "MARKET";
     els.priceField.classList.toggle("disabled", isMarket);
     els.orderPrice.disabled = isMarket;
-    els.orderPrice.placeholder = isMarket ? "Market price" : "100.00";
-    if (isMarket) {
-      if (els.orderPrice.value.trim()) {
-        els.orderPrice.dataset.limitPrice = els.orderPrice.value;
-      }
-      els.orderPrice.value = "Market price";
-      return;
-    }
-    els.orderPrice.value = els.orderPrice.dataset.limitPrice || "100.00";
+    if (isMarket) els.orderPrice.value = "";
   }
 
   function updateSideState() {

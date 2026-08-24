@@ -15,7 +15,8 @@ import exchange.model.RejectReason;
 import exchange.model.Side;
 import Price.Price;
 
-import java.util.ArrayDeque;
+import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
+import org.agrona.BitUtil;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,27 +36,66 @@ public final class InMemoryRiskEngine implements RiskEngine {
     private final ConcurrentHashMap<String, AtomicLong> bestBidCents = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, AtomicLong> bestAskCents = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RestingRiskOrder> restingByOrderId = new ConcurrentHashMap<>(TRACKING_MAP_CAPACITY);
-    private final ConcurrentHashMap<String, AtomicLong> bestOwnBidCents = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, AtomicLong> bestOwnAskCents = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> bestOwnBidCents = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> bestOwnAskCents = new ConcurrentHashMap<>();
     private final PreTradeRiskGuard preTradeRiskGuard = new PreTradeRiskGuard();
-    private final ArrayDeque<CashReservation> cashReservationPool = new ArrayDeque<>(DEFAULT_POOL_SIZE);
-    private final ArrayDeque<RestingRiskOrder> restingRiskOrderPool = new ArrayDeque<>(DEFAULT_POOL_SIZE);
-    private final ArrayDeque<PositionReservation> positionReservationPool = new ArrayDeque<>(DEFAULT_POOL_SIZE);
+    private final ManyToOneConcurrentArrayQueue<CashReservation> cashReservationPool = new ManyToOneConcurrentArrayQueue<>(DEFAULT_POOL_SIZE);
+    private final ManyToOneConcurrentArrayQueue<RestingRiskOrder> restingRiskOrderPool = new ManyToOneConcurrentArrayQueue<>(DEFAULT_POOL_SIZE);
+    private final ManyToOneConcurrentArrayQueue<PositionReservation> positionReservationPool = new ManyToOneConcurrentArrayQueue<>(DEFAULT_POOL_SIZE);
+    
+    private final CashReservation[] localCashPool = new CashReservation[1024];
+    private int localCashPoolCount = 0;
+    private final java.util.function.Consumer<CashReservation> cashDrainer = r -> localCashPool[localCashPoolCount++] = r;
+    
+    private final RestingRiskOrder[] localRestingPool = new RestingRiskOrder[1024];
+    private int localRestingPoolCount = 0;
+    private final java.util.function.Consumer<RestingRiskOrder> restingDrainer = r -> localRestingPool[localRestingPoolCount++] = r;
+    
+    private final PositionReservation[] localPositionPool = new PositionReservation[1024];
+    private int localPositionPoolCount = 0;
+    private final java.util.function.Consumer<PositionReservation> positionDrainer = r -> localPositionPool[localPositionPoolCount++] = r;
+
     private final int marketCollarBps;
     private volatile boolean globalKillSwitchEnabled;
     private volatile boolean hardRejectSelfTrade;
-    private long lastSettledSequence = Long.MIN_VALUE;
-    private long lastSettledPriceCents;
-    private int lastSettledQty;
-    private String lastSettledOrderId;
-    private String lastSettledContraOrderId;
+    private static final class SettlementCache {
+        private static final int MASK = 255;
+        private final long[] sequenceNumbers = new long[256];
+        private final String[] orderIds = new String[256];
+        private final String[] contraOrderIds = new String[256];
+        private int cursor = 0;
+
+        public boolean isDuplicate(long sequence, String oId, String cOId) {
+            int c = cursor;
+            for (int i = 0; i < 64; i++) {
+                int idx = (c - 1 - i) & MASK;
+                if (sequenceNumbers[idx] == sequence) {
+                    if ((oId.equals(orderIds[idx]) && cOId.equals(contraOrderIds[idx])) ||
+                        (oId.equals(contraOrderIds[idx]) && cOId.equals(orderIds[idx]))) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        public void add(long sequence, String oId, String cOId) {
+            int idx = cursor & MASK;
+            sequenceNumbers[idx] = sequence;
+            orderIds[idx] = oId;
+            contraOrderIds[idx] = cOId;
+            cursor++;
+        }
+    }
+    private final SettlementCache settlementCache = new SettlementCache();
 
     private static int configuredPoolSize() {
         String configured = System.getProperty("riskObjectPoolSize");
         if (configured == null || configured.isBlank()) {
             configured = System.getenv("RISK_OBJECT_POOL_SIZE");
         }
-        return configured == null || configured.isBlank() ? 16_384 : Integer.parseInt(configured);
+        int size = configured == null || configured.isBlank() ? 16_384 : Integer.parseInt(configured);
+        return BitUtil.findNextPositivePowerOfTwo(size);
     }
 
     private static int mapCapacity(int expectedEntries) {
@@ -70,9 +110,9 @@ public final class InMemoryRiskEngine implements RiskEngine {
         this.defaultProfile = defaultProfile;
         this.marketCollarBps = marketCollarBps;
         for (int i = 0; i < DEFAULT_POOL_SIZE; i++) {
-            cashReservationPool.addLast(new CashReservation());
-            restingRiskOrderPool.addLast(new RestingRiskOrder());
-            positionReservationPool.addLast(new PositionReservation());
+            cashReservationPool.offer(new CashReservation());
+            restingRiskOrderPool.offer(new RestingRiskOrder());
+            positionReservationPool.offer(new PositionReservation());
         }
     }
 
@@ -234,6 +274,17 @@ public final class InMemoryRiskEngine implements RiskEngine {
         return RiskMath.multiplyPositiveOrMax(reserveUnitCents, quantity(order));
     }
 
+    /**
+     * Determines the per-unit price (in cents) to use for cash reservation.
+     * <p>For MARKET buy orders, uses the current best ask price plus a collar buffer
+     * ({@code marketCollarBps} basis points). If the ask book is empty (no resting
+     * sell orders), returns {@code -1} which causes the caller to reject the order
+     * with {@link RiskDecision#MARKET_REQUIRES_REFERENCE}. This is a deliberate
+     * safety measure: without a reference price, the engine cannot compute a bounded
+     * cash reservation and risks over-committing the client's buying power.</p>
+     *
+     * @return per-unit cents to reserve, or {@code -1} if no reference price is available
+     */
     private long reserveUnitCents(OrderCommand order) {
         if (orderType(order) == OrderType.MARKET) {
             long askCents = bestValue(bestAskCents, order.symbol(), -1L);
@@ -266,12 +317,11 @@ public final class InMemoryRiskEngine implements RiskEngine {
 
     private boolean wouldSelfTrade(OrderCommand command) {
         Price commandPrice = price(command);
-        String key = ownerSymbolKey(command.clientId(), command.symbol());
         if (side(command) == Side.BUY) {
-            long ownBestAsk = bestValue(bestOwnAskCents, key, -1L);
+            long ownBestAsk = bestValue(bestOwnAskCents, command.clientId(), command.symbol(), -1L);
             return ownBestAsk > 0L && priceCrosses(Side.BUY, commandPrice, ownBestAsk);
         }
-        long ownBestBid = bestValue(bestOwnBidCents, key, -1L);
+        long ownBestBid = bestValue(bestOwnBidCents, command.clientId(), command.symbol(), -1L);
         return ownBestBid > 0L && priceCrosses(Side.SELL, commandPrice, ownBestBid);
     }
 
@@ -367,17 +417,11 @@ public final class InMemoryRiskEngine implements RiskEngine {
 
     private boolean isDuplicateSettlement(long sequenceNumber, String orderId, String contraOrderId,
             long priceCents, int fillQty) {
-        boolean duplicate = sequenceNumber == lastSettledSequence
-                && priceCents == lastSettledPriceCents
-                && fillQty == lastSettledQty
-                && orderId.equals(lastSettledContraOrderId)
-                && contraOrderId.equals(lastSettledOrderId);
-        lastSettledSequence = sequenceNumber;
-        lastSettledPriceCents = priceCents;
-        lastSettledQty = fillQty;
-        lastSettledOrderId = orderId;
-        lastSettledContraOrderId = contraOrderId;
-        return duplicate;
+        if (settlementCache.isDuplicate(sequenceNumber, orderId, contraOrderId)) {
+            return true;
+        }
+        settlementCache.add(sequenceNumber, orderId, contraOrderId);
+        return false;
     }
 
     private void trackAccepted(OrderAccepted accepted) {
@@ -428,48 +472,48 @@ public final class InMemoryRiskEngine implements RiskEngine {
     }
 
     private CashReservation borrowCashReservation() {
-        CashReservation reservation = cashReservationPool.pollFirst();
-        if (reservation == null) {
-            throw PoolExhaustedException.CASH_RESERVATION;
+        if (localCashPoolCount == 0) {
+            cashReservationPool.drain(cashDrainer, 1024);
+            if (localCashPoolCount == 0) {
+                throw PoolExhaustedException.CASH_RESERVATION;
+            }
         }
-        return reservation;
+        return localCashPool[--localCashPoolCount];
     }
 
     private RestingRiskOrder borrowRestingRiskOrder() {
-        RestingRiskOrder resting = restingRiskOrderPool.pollFirst();
-        if (resting == null) {
-            throw PoolExhaustedException.RESTING_RISK_ORDER;
+        if (localRestingPoolCount == 0) {
+            restingRiskOrderPool.drain(restingDrainer, 1024);
+            if (localRestingPoolCount == 0) {
+                throw PoolExhaustedException.RESTING_RISK_ORDER;
+            }
         }
-        return resting;
+        return localRestingPool[--localRestingPoolCount];
     }
 
     private PositionReservation borrowPositionReservation() {
-        PositionReservation reservation = positionReservationPool.pollFirst();
-        if (reservation == null) {
-            throw PoolExhaustedException.POSITION_RESERVATION;
+        if (localPositionPoolCount == 0) {
+            positionReservationPool.drain(positionDrainer, 1024);
+            if (localPositionPoolCount == 0) {
+                throw PoolExhaustedException.POSITION_RESERVATION;
+            }
         }
-        return reservation;
+        return localPositionPool[--localPositionPoolCount];
     }
 
     private void recycle(CashReservation reservation) {
         reservation.clear();
-        if (cashReservationPool.size() < DEFAULT_POOL_SIZE) {
-            cashReservationPool.addLast(reservation);
-        }
+        cashReservationPool.offer(reservation);
     }
 
     private void recycle(RestingRiskOrder resting) {
         resting.clear();
-        if (restingRiskOrderPool.size() < DEFAULT_POOL_SIZE) {
-            restingRiskOrderPool.addLast(resting);
-        }
+        restingRiskOrderPool.offer(resting);
     }
 
     private void recycle(PositionReservation reservation) {
         reservation.clear();
-        if (positionReservationPool.size() < DEFAULT_POOL_SIZE) {
-            positionReservationPool.addLast(reservation);
-        }
+        positionReservationPool.offer(reservation);
     }
 
     private void trackExecution(OrderExecuted executed) {
@@ -591,16 +635,14 @@ public final class InMemoryRiskEngine implements RiskEngine {
     }
 
     private void updateOwnBest(RestingRiskOrder resting) {
-        String key = ownerSymbolKey(resting.clientId, resting.symbol);
         if (resting.side == Side.BUY) {
-            updateBest(bestOwnBidCents, key, resting.priceCents, true);
+            updateBest(bestOwnBidCents, resting.clientId, resting.symbol, resting.priceCents, true);
         } else {
-            updateBest(bestOwnAskCents, key, resting.priceCents, false);
+            updateBest(bestOwnAskCents, resting.clientId, resting.symbol, resting.priceCents, false);
         }
     }
 
     private void recomputeOwnBest(String clientId, String symbol, Side side) {
-        String key = ownerSymbolKey(clientId, symbol);
         long best = side == Side.BUY ? Long.MIN_VALUE : Long.MAX_VALUE;
         for (RestingRiskOrder resting : restingByOrderId.values()) {
             if (resting.leavesQty <= 0
@@ -611,17 +653,28 @@ public final class InMemoryRiskEngine implements RiskEngine {
             }
             best = side == Side.BUY ? Math.max(best, resting.priceCents) : Math.min(best, resting.priceCents);
         }
+        ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> map = side == Side.BUY ? bestOwnBidCents : bestOwnAskCents;
+        ConcurrentHashMap<String, AtomicLong> clientMap = map.get(clientId);
+        if (clientMap == null) return;
+        
         if (side == Side.BUY) {
             if (best == Long.MIN_VALUE) {
-                bestOwnBidCents.remove(key);
+                clientMap.remove(symbol);
             } else {
-                atomicCell(bestOwnBidCents, key, best).set(best);
+                atomicCell(map, clientId, symbol, best).set(best);
             }
         } else if (best == Long.MAX_VALUE) {
-            bestOwnAskCents.remove(key);
+            clientMap.remove(symbol);
         } else {
-            atomicCell(bestOwnAskCents, key, best).set(best);
+            atomicCell(map, clientId, symbol, best).set(best);
         }
+    }
+
+    private static long bestValue(ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> map, String clientId, String symbol, long missingValue) {
+        ConcurrentHashMap<String, AtomicLong> clientMap = map.get(clientId);
+        if (clientMap == null) return missingValue;
+        AtomicLong value = clientMap.get(symbol);
+        return value == null ? missingValue : value.get();
     }
 
     private static long bestValue(ConcurrentHashMap<String, AtomicLong> map, String key, long missingValue) {
@@ -629,8 +682,7 @@ public final class InMemoryRiskEngine implements RiskEngine {
         return value == null ? missingValue : value.get();
     }
 
-    private static void updateBest(ConcurrentHashMap<String, AtomicLong> map, String key, long candidate,
-            boolean maximum) {
+    private static void updateBest(ConcurrentHashMap<String, AtomicLong> map, String key, long candidate, boolean maximum) {
         AtomicLong value = atomicCell(map, key, candidate);
         while (true) {
             long current = value.get();
@@ -651,8 +703,31 @@ public final class InMemoryRiskEngine implements RiskEngine {
         return existing == null ? created : existing;
     }
 
-    private String ownerSymbolKey(String clientId, String symbol) {
-        return clientId + '\u0001' + symbol;
+    private static void updateBest(ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> map, String clientId, String symbol, long candidate, boolean maximum) {
+        AtomicLong value = atomicCell(map, clientId, symbol, candidate);
+        while (true) {
+            long current = value.get();
+            long updated = maximum ? Math.max(current, candidate) : Math.min(current, candidate);
+            if (updated == current || value.compareAndSet(current, updated)) {
+                return;
+            }
+        }
+    }
+
+    private static AtomicLong atomicCell(ConcurrentHashMap<String, ConcurrentHashMap<String, AtomicLong>> map, String clientId, String symbol, long initialValue) {
+        ConcurrentHashMap<String, AtomicLong> clientMap = map.get(clientId);
+        if (clientMap == null) {
+            ConcurrentHashMap<String, AtomicLong> created = new ConcurrentHashMap<>();
+            ConcurrentHashMap<String, AtomicLong> existing = map.putIfAbsent(clientId, created);
+            clientMap = existing == null ? created : existing;
+        }
+        AtomicLong value = clientMap.get(symbol);
+        if (value != null) {
+            return value;
+        }
+        AtomicLong created = new AtomicLong(initialValue);
+        AtomicLong existing = clientMap.putIfAbsent(symbol, created);
+        return existing == null ? created : existing;
     }
 
     @Override

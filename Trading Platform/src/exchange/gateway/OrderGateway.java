@@ -60,7 +60,8 @@ public final class OrderGateway implements AutoCloseable {
     private final CommandReplicator replicator;
     private final MatchingEngine matchingEngine;
     private final EventDispatcher dispatcher;
-    private volatile ShardProcessor[] shardsBySymbolId = new ShardProcessor[16];
+    private final ShardProcessor[] shards;
+    private final int shardCount;
     private final Disruptor<StageOneCommandEvent> riskDisruptor;
     private final RingBuffer<StageOneCommandEvent> riskRingBuffer;
     private final AtomicBoolean acceptingCommands;
@@ -120,6 +121,13 @@ public final class OrderGateway implements AutoCloseable {
         this.acceptingCommands = new AtomicBoolean(acceptingCommands);
         this.riskDisruptor = newRiskDisruptor();
         this.riskRingBuffer = riskDisruptor.start();
+        
+        String shardsProp = System.getProperty("shards");
+        this.shardCount = shardsProp != null ? Integer.parseInt(shardsProp) : Math.max(4, Runtime.getRuntime().availableProcessors() / 2);
+        this.shards = new ShardProcessor[shardCount];
+        for (int i = 0; i < shardCount; i++) {
+            this.shards[i] = new ShardProcessor(i);
+        }
     }
 
     public List<ExchangeEvent> process(OrderCommand rawCommand) {
@@ -347,35 +355,8 @@ public final class OrderGateway implements AutoCloseable {
         if (symbolId <= 0) {
             throw new RejectedExecutionException("Command is missing primitive symbolId");
         }
-        ShardProcessor[] processors = shardsBySymbolId;
-        if (symbolId < processors.length) {
-            ShardProcessor existing = processors[symbolId];
-            if (existing != null) {
-                return existing;
-            }
-        }
-        return createProcessorFor(symbolId, command.symbol());
-    }
-
-    private synchronized ShardProcessor createProcessorFor(int symbolId, String symbol) {
-        ShardProcessor[] processors = shardsBySymbolId;
-        if (symbolId >= processors.length) {
-            int nextLength = processors.length;
-            while (symbolId >= nextLength) {
-                nextLength <<= 1;
-            }
-            ShardProcessor[] expanded = new ShardProcessor[nextLength];
-            System.arraycopy(processors, 0, expanded, 0, processors.length);
-            shardsBySymbolId = expanded;
-            processors = expanded;
-        }
-        ShardProcessor existing = processors[symbolId];
-        if (existing != null) {
-            return existing;
-        }
-        ShardProcessor created = new ShardProcessor(symbolId, symbol);
-        processors[symbolId] = created;
-        return created;
+        int shardIndex = (symbolId & Integer.MAX_VALUE) % shardCount;
+        return shards[shardIndex];
     }
 
     private Disruptor<StageOneCommandEvent> newRiskDisruptor() {
@@ -429,17 +410,11 @@ public final class OrderGateway implements AutoCloseable {
 
     public List<ShardStatus> shardStatuses() {
         ArrayList<ShardStatus> statuses = new ArrayList<>();
-        ShardProcessor[] processors = shardsBySymbolId;
-        for (int symbolId = 1; symbolId < processors.length; symbolId++) {
-            ShardProcessor processor = processors[symbolId];
-            if (processor == null) {
-                continue;
-            }
-            String symbol = validator.symbolFor(symbolId);
-            statuses.add(new ShardStatus(symbol == null ? Integer.toString(symbolId) : symbol, processor.running(),
+        for (int i = 0; i < shardCount; i++) {
+            ShardProcessor processor = shards[i];
+            statuses.add(new ShardStatus("shard-" + i, processor.running(),
                     processor.queuedCommands(), processor.completedCommands()));
         }
-        statuses.sort((left, right) -> left.symbol().compareTo(right.symbol()));
         return List.copyOf(statuses);
     }
 
@@ -504,14 +479,9 @@ public final class OrderGateway implements AutoCloseable {
         return List.copyOf(enriched);
     }
 
-    @Override
     public void close() {
         pauseIngress();
-        ShardProcessor[] processors = shardsBySymbolId;
-        for (ShardProcessor processor : processors) {
-            if (processor == null) {
-                continue;
-            }
+        for (ShardProcessor processor : shards) {
             processor.close();
         }
         try {
@@ -525,20 +495,18 @@ public final class OrderGateway implements AutoCloseable {
     }
 
     private final class ShardProcessor implements AutoCloseable {
-        private final int symbolId;
-        private final String symbol;
+        private final int shardId;
         private final Disruptor<ShardEvent> disruptor;
         private final RingBuffer<ShardEvent> ringBuffer;
         private final AtomicBoolean running = new AtomicBoolean(true);
         private final AtomicLong completedCommands = new AtomicLong();
 
-        private ShardProcessor(int symbolId, String symbol) {
-            this.symbolId = symbolId;
-            this.symbol = symbol;
+        private ShardProcessor(int shardId) {
+            this.shardId = shardId;
             this.disruptor = new Disruptor<>(
                     ShardEvent::new,
                     SHARD_RING_CAPACITY,
-                    new AffinityThreadFactory("matching-" + symbolId + "-" + symbol),
+                    new AffinityThreadFactory("matching-shard-" + shardId),
                     ProducerType.SINGLE,
                     DisruptorWaitStrategies.latencySensitive());
             this.disruptor.setDefaultExceptionHandler(new FailSafeDisruptorExceptionHandler<>("matching-shard",

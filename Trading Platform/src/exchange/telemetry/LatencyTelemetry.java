@@ -3,6 +3,8 @@ package exchange.telemetry;
 import org.HdrHistogram.ConcurrentHistogram;
 import org.HdrHistogram.Histogram;
 
+import java.nio.ByteBuffer;
+import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -22,6 +24,8 @@ public final class LatencyTelemetry {
             new ConcurrentHistogram(1L, HIGHEST_TRACKABLE_NS, SIGNIFICANT_DIGITS);
     private final ConcurrentHistogram egressWriteNs =
             new ConcurrentHistogram(1L, HIGHEST_TRACKABLE_NS, SIGNIFICANT_DIGITS);
+    private final ConcurrentHistogram correctedTickToTradeNs =
+            new ConcurrentHistogram(1L, HIGHEST_TRACKABLE_NS, SIGNIFICANT_DIGITS);
 
     public static LatencyTelemetry getInstance() {
         return INSTANCE;
@@ -35,6 +39,10 @@ public final class LatencyTelemetry {
         record(tickToTradeNs, ingressTimeNs, egressWriteNs);
     }
 
+    public void recordCorrectedTickToTrade(long trueIngressTimeNs, long egressWriteNs) {
+        record(correctedTickToTradeNs, trueIngressTimeNs, egressWriteNs);
+    }
+
     public void recordEgressWrite(long eventTimestampNs, long egressWriteNs) {
         record(this.egressWriteNs, eventTimestampNs, egressWriteNs);
     }
@@ -43,13 +51,25 @@ public final class LatencyTelemetry {
         return new LatencyReport(
                 snapshotOf(tickToTradeNs),
                 snapshotOf(engineToDispatchNs),
-                snapshotOf(egressWriteNs));
+                snapshotOf(egressWriteNs),
+                snapshotOf(correctedTickToTradeNs));
+    }
+
+    public String snapshotBase64() {
+        Histogram copy = correctedTickToTradeNs.copy();
+        ByteBuffer buffer = ByteBuffer.allocate(copy.getNeededByteBufferCapacity());
+        int bytesWritten = copy.encodeIntoCompressedByteBuffer(buffer);
+        byte[] bytes = new byte[bytesWritten];
+        buffer.flip();
+        buffer.get(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
     }
 
     public void reset() {
         tickToTradeNs.reset();
         engineToDispatchNs.reset();
         egressWriteNs.reset();
+        correctedTickToTradeNs.reset();
     }
 
     private static void record(ConcurrentHistogram histogram, long startNs, long endNs) {
@@ -79,7 +99,8 @@ public final class LatencyTelemetry {
     public record LatencyReport(
             LatencySnapshot tickToTrade,
             LatencySnapshot engineToDispatch,
-            LatencySnapshot egressWrite) {
+            LatencySnapshot egressWrite,
+            LatencySnapshot correctedTickToTrade) {
     }
 
     public record LatencySnapshot(

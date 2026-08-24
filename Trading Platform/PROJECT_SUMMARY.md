@@ -38,25 +38,25 @@ Triple verification profile:
 - **Virtual Users:** 500
 - **Order Interval:** 200 ms
 - **Saturation Hold:** 30s
-- **Total Orders Sent Across Runs:** 295,294
-- **Total Accepted ACKs Across Runs:** 295,294
+- **Total Orders Sent Across Runs:** 295,500
+- **Total Accepted ACKs Across Runs:** 295,500
 - **Total Rejected ACKs Across Runs:** 0
 - **Total Load-Shed Rejects Across Runs:** 0
-- **Average Order Send Rate:** 1,196.21 orders/sec
-- **Average Accepted ACK Rate:** 1,196.21 accepted ACKs/sec
-- **Average Accepted p95:** 5.33 ms
-- **Average Accepted p99:** 19.67 ms
-- **Worst Accepted p99:** 31.00 ms
+- **Average Order Send Rate:** 1,197.12 orders/sec
+- **Average Accepted ACK Rate:** 1,197.12 accepted ACKs/sec
+- **Average Accepted p95:** 7.00 ms
+- **Average Accepted p99:** 28.00 ms
+- **Worst Accepted p99:** 42.00 ms
 - **Average ACK Timeout Rate:** 0.00000000
 - **Worst ACK Timeout Rate:** 0.00000000
-- **Average Total GC Pause:** 0.146 ms
-- **Worst Total GC Pause:** 0.166 ms
+- **Average Total GC Pause:** 0.182 ms
+- **Worst Total GC Pause:** 0.257 ms
 
 | Run | Accepted p99 (ms) | Accepted p95 (ms) | ACK Timeout Rate | Total GC Pause (ms) | Accepted ACKs | Rejected ACKs | Load-Shed Rejects |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| run-1-20260711-210323 | 18.00 | 5.00 | 0.00000000 | 0.119 | 98294 | 0 | 0 |
-| run-2-20260711-210504 | 10.00 | 5.00 | 0.00000000 | 0.166 | 98500 | 0 | 0 |
-| run-3-20260711-210645 | 31.00 | 6.00 | 0.00000000 | 0.154 | 98500 | 0 | 0 |
+| run-1-20260807-105410 | 42.00 | 10.00 | 0.00000000 | 0.147 | 98500 | 0 | 0 |
+| run-2-20260807-105554 | 14.00 | 5.00 | 0.00000000 | 0.141 | 98500 | 0 | 0 |
+| run-3-20260807-105735 | 28.00 | 6.00 | 0.00000000 | 0.257 | 98500 | 0 | 0 |
 
 ## Operational Notes
 

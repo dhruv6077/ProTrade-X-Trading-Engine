@@ -14,9 +14,10 @@ public final class DisruptorWaitStrategies {
     }
 
     public static WaitStrategy latencySensitive() {
-        String configured = setting("DISRUPTOR_WAIT_MODE", "disruptor.waitMode", "auto")
+        String configured = setting("DISRUPTOR_WAIT_MODE", "disruptor.waitMode", "spin")
                 .toLowerCase(Locale.ROOT);
         return switch (configured) {
+            case "spin" -> new com.lmax.disruptor.BusySpinWaitStrategy();
             case "yielding" -> new YieldingWaitStrategy();
             case "blocking", "lite-blocking" -> new LiteBlockingWaitStrategy();
             case "phased" -> localPhasedWait();

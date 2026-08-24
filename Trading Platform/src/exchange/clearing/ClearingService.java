@@ -16,11 +16,16 @@ import java.util.List;
 public final class ClearingService implements EventHandler<RingBufferEvent>, EventListener {
     private final InMemoryRiskEngine riskEngine;
     private final boolean hydrateAcceptedReservations;
-    private long lastSettledSequence = Long.MIN_VALUE;
-    private long lastSettledPriceCents;
-    private int lastSettledQty;
-    private String lastSettledOrderId;
-    private String lastSettledContraOrderId;
+    /**
+     * Bounded LRU set of recently settled composite keys to prevent double-settlement.
+     * Key format: "sequenceNumber|orderId|contraOrderId" — uniquely identifies each fill event.
+     */
+    private final java.util.LinkedHashMap<String, Boolean> settledKeys = new java.util.LinkedHashMap<>(128, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<String, Boolean> eldest) {
+            return size() > 4096;
+        }
+    };
 
     public ClearingService(InMemoryRiskEngine riskEngine) {
         this(riskEngine, false);
@@ -105,16 +110,20 @@ public final class ClearingService implements EventHandler<RingBufferEvent>, Eve
 
     private boolean isDuplicateSettlement(long sequenceNumber, String orderId, String contraOrderId,
             long priceCents, int fillQty) {
-        boolean duplicate = sequenceNumber == lastSettledSequence
-                && priceCents == lastSettledPriceCents
-                && fillQty == lastSettledQty
-                && orderId.equals(lastSettledContraOrderId)
-                && contraOrderId.equals(lastSettledOrderId);
-        lastSettledSequence = sequenceNumber;
-        lastSettledPriceCents = priceCents;
-        lastSettledQty = fillQty;
-        lastSettledOrderId = orderId;
-        lastSettledContraOrderId = contraOrderId;
-        return duplicate;
+        // Normalize key so mirror events (orderId/contraOrderId swapped) produce the same key
+        String first, second;
+        if (orderId.compareTo(contraOrderId) <= 0) {
+            first = orderId;
+            second = contraOrderId;
+        } else {
+            first = contraOrderId;
+            second = orderId;
+        }
+        String key = sequenceNumber + "|" + first + "|" + second;
+        if (settledKeys.containsKey(key)) {
+            return true;
+        }
+        settledKeys.put(key, Boolean.TRUE);
+        return false;
     }
 }

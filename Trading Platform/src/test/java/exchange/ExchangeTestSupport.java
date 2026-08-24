@@ -29,21 +29,23 @@ final class ExchangeTestSupport {
     }
 
     static TestExchange newExchange(Set<String> symbols, Sequencer sequencer) {
-        InMemoryCommandJournal journal = new InMemoryCommandJournal(4_096);
+        return newExchange(symbols, sequencer, new InMemoryCommandJournal(4_096));
+    }
+
+    static TestExchange newExchange(Set<String> symbols, Sequencer sequencer, exchange.journal.CommandJournal customJournal) {
         InMemoryEventDispatcher dispatcher = new InMemoryEventDispatcher();
         InMemoryRiskEngine riskEngine = new InMemoryRiskEngine(new RiskProfile(10_000_000_000L, 10_000_000,
                 10_000_000_000L, false));
         MarketDataEngine marketDataEngine = new MarketDataEngine();
-        dispatcher.addListener(new ClearingService(riskEngine));
         dispatcher.addListener(marketDataEngine);
         OrderGateway gateway = new OrderGateway(
                 new GatewayValidator(symbols, 1, 1, 1_000_000),
                 riskEngine,
                 sequencer,
-                journal,
+                customJournal,
                 new DeterministicMatchingEngine(symbols),
                 dispatcher);
-        return new TestExchange(gateway, journal, dispatcher, riskEngine, marketDataEngine);
+        return new TestExchange(gateway, customJournal, dispatcher, riskEngine, marketDataEngine);
     }
 
     static TestExchange newExchange(Set<String> symbols, Clock clock) {
@@ -62,7 +64,7 @@ final class ExchangeTestSupport {
 
     record TestExchange(
             OrderGateway gateway,
-            InMemoryCommandJournal journal,
+            exchange.journal.CommandJournal journal,
             InMemoryEventDispatcher dispatcher,
             InMemoryRiskEngine riskEngine,
             MarketDataEngine marketDataEngine) implements AutoCloseable {
@@ -71,7 +73,13 @@ final class ExchangeTestSupport {
             gateway.close();
             dispatcher.close();
             marketDataEngine.close();
-            journal.close();
+            if (journal instanceof AutoCloseable c) {
+                try {
+                    c.close();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
     }
 }

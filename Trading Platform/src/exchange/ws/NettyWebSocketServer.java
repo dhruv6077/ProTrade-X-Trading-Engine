@@ -103,6 +103,8 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
             AttributeKey.valueOf("exchange.ws.flushScheduled");
     private static final AttributeKey<AtomicBoolean> SLOW_CONSUMER_CLOSING_KEY =
             AttributeKey.valueOf("exchange.ws.slowConsumerClosing");
+    private static final AttributeKey<Long> INGRESS_TIME_KEY =
+            AttributeKey.valueOf("exchange.ws.ingressTime");
     private static final ThreadLocal<RingBufferEvent> IMMEDIATE_REPORT =
             ThreadLocal.withInitial(RingBufferEvent::new);
 
@@ -159,6 +161,7 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
                     protected void initChannel(SocketChannel channel) {
                         applyLowLatencySocketOptions(channel, useEpoll);
                         ChannelPipeline pipeline = channel.pipeline();
+                        pipeline.addFirst(new IngressTimestampHandler());
                         pipeline.addLast(new HttpServerCodec());
                         pipeline.addLast(new HttpObjectAggregator(65_536));
                         pipeline.addLast(new WebSocketChannelHandler());
@@ -345,7 +348,9 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
         if (frame instanceof BinaryWebSocketFrame binaryFrame) {
             ChannelRole role = context.channel().attr(ROLE_KEY).get();
             if (role == ChannelRole.ORDERS) {
-                handleBinaryOrderCommand(context.channel(), binaryFrame.content(), System.nanoTime());
+                Long ingressTimeObj = context.channel().attr(INGRESS_TIME_KEY).get();
+                long ingressTimeNs = ingressTimeObj != null ? ingressTimeObj : System.nanoTime();
+                handleBinaryOrderCommand(context.channel(), binaryFrame.content(), ingressTimeNs);
             } else {
                 context.writeAndFlush(new TextWebSocketFrame(gson.toJson(new ErrorEnvelope("error",
                         "Binary frames are only supported on /ws/orders"))));
@@ -360,7 +365,9 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
         if (role == ChannelRole.MARKET_DATA) {
             handleMarketDataCommand(context.channel(), textFrame.text());
         } else if (role == ChannelRole.ORDERS) {
-            handleOrderCommand(context.channel(), textFrame.text(), System.nanoTime());
+            Long ingressTimeObj = context.channel().attr(INGRESS_TIME_KEY).get();
+            long ingressTimeNs = ingressTimeObj != null ? ingressTimeObj : System.nanoTime();
+            handleOrderCommand(context.channel(), textFrame.text(), ingressTimeNs);
         } else {
             context.writeAndFlush(new TextWebSocketFrame(gson.toJson(new ErrorEnvelope("error",
                     "WebSocket channel is not initialized"))));
@@ -524,8 +531,10 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
             return;
         }
         long ingressTimeNs = event.getEngineInNanos();
-        TextWebSocketFrame frame = new TextWebSocketFrame(ExecutionReportJsonEncoder.encode(channel, event));
-        LatencyTelemetry.getInstance().recordTickToTrade(ingressTimeNs, System.nanoTime());
+        TextWebSocketFrame frame = new TextWebSocketFrame(DirectJsonEncoder.encode(channel, event));
+        long egressNs = System.nanoTime();
+        LatencyTelemetry.getInstance().recordTickToTrade(ingressTimeNs, egressNs);
+        LatencyTelemetry.getInstance().recordCorrectedTickToTrade(ingressTimeNs, egressNs);
         if (flush) {
             channel.writeAndFlush(frame);
         } else {
@@ -778,6 +787,14 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
         public void exceptionCaught(ChannelHandlerContext context, Throwable cause) {
             logger.warn("WebSocket channel failure", cause);
             context.close();
+        }
+    }
+
+    private static final class IngressTimestampHandler extends io.netty.channel.ChannelInboundHandlerAdapter {
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            ctx.channel().attr(INGRESS_TIME_KEY).set(System.nanoTime());
+            super.channelRead(ctx, msg);
         }
     }
 
@@ -1101,133 +1118,4 @@ public final class NettyWebSocketServer implements AutoCloseable, EventListener,
         }
     }
 
-    private static final class ExecutionReportJsonEncoder {
-        private static final ThreadLocal<StringBuilder> BUILDERS =
-                ThreadLocal.withInitial(() -> new StringBuilder(512));
-
-        private static ByteBuf encode(Channel channel, RingBufferEvent event) {
-            StringBuilder builder = BUILDERS.get();
-            builder.setLength(0);
-            builder.append("{\"type\":\"execution-report\",\"status\":");
-            appendJsonString(builder, status(event.getEventType()));
-            builder.append(",\"sequenceNumber\":").append(event.getSequenceNumber())
-                    .append(",\"orderId\":");
-            appendJsonString(builder, event.getOrderId());
-            builder.append(",\"clientId\":");
-            appendJsonString(builder, event.getClientId());
-            builder.append(",\"symbol\":");
-            appendJsonString(builder, event.getSymbol());
-            builder.append(",\"eventTimestamp\":");
-            appendInstantEpochNanosString(builder, event.getEventTimestamp());
-            builder.append(",\"details\":{");
-            appendDetails(builder, event);
-            builder.append("}}");
-
-            ByteBuf buffer = channel.alloc().buffer(builder.length());
-            buffer.writeCharSequence(builder, StandardCharsets.UTF_8);
-            return buffer;
-        }
-
-        private static String status(RingBufferEvent.EventType eventType) {
-            return switch (eventType) {
-                case ACCEPTED -> "accepted";
-                case REJECTED -> "rejected";
-                case EXECUTED -> "executed";
-                case CANCELLED -> "cancelled";
-                case RESTATED -> "restated";
-                case ADMIN -> "admin";
-            };
-        }
-
-        private static void appendDetails(StringBuilder builder, RingBufferEvent event) {
-            switch (event.getEventType()) {
-                case ACCEPTED -> {
-                    builder.append("\"side\":");
-                    appendJsonString(builder, event.getSide() == null ? null : event.getSide().name());
-                    builder.append(",\"orderType\":");
-                    appendJsonString(builder, event.getOrderType() == null ? null : event.getOrderType().name());
-                    builder.append(",\"price\":");
-                    appendJsonPriceString(builder, event.getPrice());
-                    builder.append(",\"quantity\":").append(event.getQuantity())
-                            .append(",\"leavesQty\":").append(event.getLeavesQty())
-                            .append(",\"cumQty\":").append(event.getCumQty());
-                }
-                case REJECTED -> {
-                    builder.append("\"reason\":");
-                    appendJsonString(builder, event.getRejectReason() == null ? null : event.getRejectReason().name());
-                    builder.append(",\"message\":");
-                    appendJsonString(builder, event.getMessage());
-                }
-                case EXECUTED -> {
-                    builder.append("\"side\":");
-                    appendJsonString(builder, event.getSide() == null ? null : event.getSide().name());
-                    builder.append(",\"contraOrderId\":");
-                    appendJsonString(builder, event.getContraOrderId());
-                    builder.append(",\"fillPrice\":");
-                    appendJsonPriceString(builder, event.getFillPrice());
-                    builder.append(",\"fillQty\":").append(event.getFillQty())
-                            .append(",\"leavesQty\":").append(event.getLeavesQty())
-                            .append(",\"cumQty\":").append(event.getCumQty())
-                            .append(",\"fullFill\":").append(event.isFullFill())
-                            .append(",\"latencyNanos\":")
-                            .append(Math.max(0L, event.getEventEmittedNanos() - event.getEngineInNanos()));
-                }
-                case CANCELLED -> {
-                    builder.append("\"cancelledQty\":").append(event.getCancelledQty())
-                            .append(",\"reason\":");
-                    appendJsonString(builder, event.getMessage());
-                }
-                case RESTATED -> {
-                    builder.append("\"price\":");
-                    appendJsonPriceString(builder, event.getPrice());
-                    builder.append(",\"quantity\":").append(event.getQuantity())
-                            .append(",\"leavesQty\":").append(event.getLeavesQty())
-                            .append(",\"cumQty\":").append(event.getCumQty());
-                }
-                case ADMIN -> {
-                    builder.append("\"operation\":");
-                    appendJsonString(builder, event.getAdminOperation() == null ? null : event.getAdminOperation().name());
-                    builder.append(",\"message\":");
-                    appendJsonString(builder, event.getMessage());
-                }
-            }
-        }
-
-        private static void appendJsonPriceString(StringBuilder builder, Price price) {
-            if (price == null) {
-                builder.append("null");
-                return;
-            }
-            long cents = price.getCents();
-            long absCents = Math.abs(cents);
-            long dollars = absCents / 100;
-            long fractional = absCents % 100;
-            builder.append('"');
-            if (cents < 0) {
-                builder.append('-');
-            }
-            builder.append(dollars).append('.');
-            if (fractional < 10) {
-                builder.append('0');
-            }
-            builder.append(fractional).append('"');
-        }
-
-        private static void appendInstantEpochNanosString(StringBuilder builder, Instant instant) {
-            if (instant == null) {
-                builder.append("null");
-                return;
-            }
-            builder.append('"')
-                    .append(instant.getEpochSecond())
-                    .append('.');
-            int nanos = instant.getNano();
-            int divisor = 100_000_000;
-            while (divisor > 0) {
-                builder.append((char) ('0' + (nanos / divisor) % 10));
-                divisor /= 10;
-            }
-            builder.append('"');
-        }
-    }
 }

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vision Trader Architecture</title>
+  <style>
+    :root {
+      --ink: #101b33;
+      --muted: #58657d;
+      --line: #cbd5e1;
+      --blue: #1769ff;
+      --blue-soft: #eaf1ff;
+      --teal: #0f9f8f;
+      --teal-soft: #e7f8f4;
+      --orange: #f47b20;
+      --orange-soft: #fff2e8;
+      --violet: #7656e8;
+      --violet-soft: #f1edff;
+      --paper: #f8fafc;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 1200px;
+      height: 1500px;
+      margin: 0;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .poster {
+      width: 1200px;
+      height: 1500px;
+      padding: 54px 58px 42px;
+      background:
+        linear-gradient(rgba(23, 105, 255, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 105, 255, .035) 1px, transparent 1px),
+        #fff;
+      background-size: 30px 30px;
+      position: relative;
+    }
+
+    .topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 2.4px;
+      text-transform: uppercase;
+    }
+
+    .version {
+      border: 1px solid #b9c7dc;
+      border-radius: 999px;
+      padding: 8px 14px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 700;
+      background: rgba(255,255,255,.86);
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 980px;
+      font-size: 60px;
+      line-height: 1.04;
+      letter-spacing: -2.4px;
+      font-weight: 850;
+    }
+
+    h1 span { color: var(--blue); }
+
+    .subtitle {
+      margin: 16px 0 32px;
+      max-width: 1020px;
+      color: #33415c;
+      font-size: 22px;
+      line-height: 1.45;
+      font-weight: 520;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 26px;
+    }
+
+    .principle {
+      min-height: 118px;
+      padding: 17px 18px 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(255,255,255,.95);
+      box-shadow: 0 4px 0 rgba(15, 23, 42, .08);
+    }
+
+    .principle strong {
+      display: block;
+      margin: 8px 0 5px;
+      font-size: 18px;
+      line-height: 1.1;
+    }
+
+    .principle small {
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .blue .icon { color: var(--blue); background: var(--blue-soft); }
+    .teal .icon { color: var(--teal); background: var(--teal-soft); }
+    .orange .icon { color: var(--orange); background: var(--orange-soft); }
+    .violet .icon { color: var(--violet); background: var(--violet-soft); }
+
+    .architecture {
+      border: 1.5px solid #aebbd0;
+      border-radius: 18px;
+      padding: 20px 22px 22px;
+      background: rgba(255,255,255,.96);
+      box-shadow: 0 6px 0 rgba(15, 23, 42, .11);
+    }
+
+    .arch-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .arch-title strong { font-size: 23px; }
+    .arch-title span { color: var(--muted); font-size: 14px; font-weight: 700; }
+
+    .lane {
+      position: relative;
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      min-height: 147px;
+      border-top: 1px solid #d8e0eb;
+      padding: 14px 0;
+    }
+
+    .lane:first-of-type { border-top: 0; }
+
+    .lane-label {
+      padding: 10px 14px 10px 4px;
+    }
+
+    .lane-index {
+      display: block;
+      margin-bottom: 6px;
+      font: 800 12px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+    }
+
+    .lane-label strong {
+      display: block;
+      font-size: 19px;
+      line-height: 1.12;
+    }
+
+    .lane-label small {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.32;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr);
+      align-items: stretch;
+      gap: 0;
+      position: relative;
+    }
+
+    .node {
+      min-width: 0;
+      padding: 14px 15px 12px;
+      border: 1.5px solid currentColor;
+      border-radius: 12px;
+      position: relative;
+      background: #fff;
+    }
+
+    .node strong {
+      display: block;
+      font-size: 17px;
+      line-height: 1.15;
+    }
+
+    .node p {
+      margin: 7px 0 0;
+      color: #536079;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .node .tag {
+      display: inline-flex;
+      margin-top: 9px;
+      padding: 4px 7px;
+      border-radius: 5px;
+      background: currentColor;
+      color: #fff;
+      font: 800 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+    }
+
+    .node.blue { color: var(--blue); background: #f8fbff; }
+    .node.teal { color: var(--teal); background: #f5fcfa; }
+    .node.orange { color: var(--orange); background: #fffaf6; }
+    .node.violet { color: var(--violet); background: #fbfaff; }
+    .node.blue .tag { background: var(--blue); }
+    .node.teal .tag { background: var(--teal); }
+    .node.orange .tag { background: var(--orange); }
+    .node.violet .tag { background: var(--violet); }
+
+    .arrow {
+      position: relative;
+      z-index: 2;
+      width: 24px;
+      min-width: 24px;
+      color: transparent;
+      font-size: 0;
+      align-self: stretch;
+    }
+
+    .arrow::before {
+      content: "";
+      position: absolute;
+      left: 4px;
+      right: 5px;
+      top: 50%;
+      height: 2px;
+      border-radius: 2px;
+      background: #6d7b93;
+      transform: translateY(-1px);
+      animation: connectorPulse 2.4s ease-in-out infinite;
+    }
+
+    .arrow::after {
+      content: "";
+      position: absolute;
+      right: 4px;
+      top: calc(50% - 4px);
+      width: 7px;
+      height: 7px;
+      border-top: 2px solid #6d7b93;
+      border-right: 2px solid #6d7b93;
+      transform: rotate(45deg);
+    }
+
+    .arrow.a2::before { animation-delay: 1.2s; }
+
+    @keyframes connectorPulse {
+      0%, 100% { opacity: .55; box-shadow: none; }
+      50% { opacity: 1; box-shadow: 0 0 7px rgba(23, 105, 255, .45); }
+    }
+
+    .pulse {
+      display: none;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1.1fr repeat(4, 1fr);
+      margin-top: 25px;
+      border: 1px solid #bdc8d8;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 4px 0 rgba(15,23,42,.08);
+    }
+
+    .metric {
+      min-height: 105px;
+      padding: 18px 16px;
+      border-left: 1px solid #d7dee8;
+    }
+
+    .metric:first-child {
+      border-left: 0;
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .metric span {
+      display: block;
+      color: #6d7890;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 1.1px;
+      text-transform: uppercase;
+    }
+
+    .metric:first-child span { color: #a9b5ca; }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 26px;
+      line-height: 1;
+      letter-spacing: -.7px;
+    }
+
+    .metric small {
+      display: block;
+      margin-top: 8px;
+      color: #67748a;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .metric:first-child small { color: #bdc6d5; }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 22px;
+      padding: 0 2px;
+      color: #68758b;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    footer strong { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <main class="poster">
+    <div class="topline">
+      <div class="eyebrow">ProTrade-X Rebuild · Part 10</div>
+      <div class="version">Java 21+ · ECN Architecture</div>
+    </div>
+
+    <h1>Inside the <span>Vision Trader</span> Execution Engine</h1>
+    <p class="subtitle">A deterministic, allocation-disciplined exchange pipeline designed to protect account correctness, isolate matching, and keep network and persistence work away from the critical path.</p>
+
+    <section class="principles">
+      <article class="principle blue"><div class="icon">01</div><strong>Single Writer</strong><small>Account and risk mutations execute in one deterministic lane.</small></article>
+      <article class="principle teal"><div class="icon">02</div><strong>Lock-Free Handoff</strong><small>Preallocated ring slots move primitive command fields between stages.</small></article>
+      <article class="principle orange"><div class="icon">03</div><strong>Sharded Matching</strong><small>Independent symbol shards preserve FIFO without global locks.</small></article>
+      <article class="principle violet"><div class="icon">04</div><strong>Async Egress</strong><small>Market data, audit, and networking cannot stall execution.</small></article>
+    </section>
+
+    <section class="architecture">
+      <div class="arch-title"><strong>The Four-Tier Execution Flow</strong><span>Solid = critical path · async boundaries isolate jitter</span></div>
+
+      <div class="lane">
+        <div class="lane-label"><span class="lane-index" style="color:var(--blue)">Tier 1</span><strong>Ingress</strong><small>Network edge and primitive command parsing.</small></div>
+        <div class="flow">
+          <div class="node blue"><strong>Netty WebSocket</strong><p>Persistent /ws/orders channels, pooled ByteBufs, correlated ACKs.</p><span class="tag">Network Edge</span></div>
+          <div class="arrow a1">→</div><div class="pulse"></div>
+          <div class="node blue"><strong>Char Scanner</strong><p>Extracts order primitives without Gson, maps, regex, or DTO creation.</p><span class="tag">Low Allocation</span></div>
+          <div class="arrow a2">→</div>
+          <div class="node blue"><strong>Order Gateway</strong><p>Validation, symbol IDs, monotonic sequencing, fast-fail load shedding.</p><span class="tag">Wait-Free Entry</span></div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-label"><span class="lane-index" style="color:var(--teal)">Tier 2</span><strong>Risk Core</strong><small>Cross-symbol account safety before matching.</small></div>
+        <div class="flow">
+          <div class="node teal"><strong>Stage 1 Ring</strong><p>Serialized command stream using preallocated mutable flyweights.</p><span class="tag">Single Producer</span></div>
+          <div class="arrow a1">→</div><div class="pulse"></div>
+          <div class="node teal"><strong>Pre-Trade Risk</strong><p>Cash reservation, position limits, notional bounds, STP checks.</p><span class="tag">Single Writer</span></div>
+          <div class="arrow a2">→</div>
+          <div class="node teal"><strong>Command Journal</strong><p>Append-only sequence enables deterministic replay and audit.</p><span class="tag">Source of Truth</span></div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-label"><span class="lane-index" style="color:var(--orange)">Tier 3</span><strong>Execution</strong><small>Cache-friendly, symbol-owned order books.</small></div>
+        <div class="flow">
+          <div class="node orange"><strong>Stage 2 Ring</strong><p>Primitive field copy isolates pooled Stage 1 command lifecycles.</p><span class="tag">Lock-Free Handoff</span></div>
+          <div class="arrow a1">→</div><div class="pulse"></div>
+          <div class="node orange"><strong>Matching Shards</strong><p>Price-time FIFO, partial fills, sweeps, IOC/FOK, cancel and modify.</p><span class="tag">Per-Symbol Owner</span></div>
+          <div class="arrow a2">→</div>
+          <div class="node orange"><strong>Clearing</strong><p>Atomic cash settlement, released reservations, exact positions.</p><span class="tag">Deterministic State</span></div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-label"><span class="lane-index" style="color:var(--violet)">Tier 4</span><strong>Egress</strong><small>Downstream work is decoupled from execution.</small></div>
+        <div class="flow">
+          <div class="node violet"><strong>Event Ring</strong><p>Mutable batches carry executions and state deltas without copies.</p><span class="tag">Multicast</span></div>
+          <div class="arrow a1">→</div><div class="pulse"></div>
+          <div class="node violet"><strong>Market Data Engine</strong><p>L2 depth, trade tape, OHLCV, snapshot conflation, bounded history.</p><span class="tag">Async Projection</span></div>
+          <div class="arrow a2">→</div>
+          <div class="node violet"><strong>Client + Audit Fanout</strong><p>Netty batching, slow-consumer eviction, PostgreSQL analytics sink.</p><span class="tag">Backpressure Safe</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="metrics">
+      <div class="metric"><span>Verified profile</span><strong>500 VUs</strong><small>Three consecutive WebSocket saturation runs</small></div>
+      <div class="metric"><span>Accepted ACKs</span><strong>295,294</strong><small>Across the triple-verification profile</small></div>
+      <div class="metric"><span>Avg p99</span><strong>19.67 ms</strong><small>31 ms worst run, below 50 ms target</small></div>
+      <div class="metric"><span>Transport</span><strong>0 drops</strong><small>0 connection failures · 0 ACK timeouts</small></div>
+      <div class="metric"><span>Avg GC pause</span><strong>0.146 ms</strong><small>Allocation-disciplined steady-state pipeline</small></div>
+    </section>
+
+    <footer><strong>Vision Trader · Deterministic ECN Learning Platform</strong><span>Java · Netty · LMAX Disruptor · PostgreSQL · JFR · k6</span></footer>
+  </main>
+</body>
+</html>

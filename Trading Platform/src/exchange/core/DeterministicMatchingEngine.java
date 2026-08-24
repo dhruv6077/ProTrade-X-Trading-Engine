@@ -151,11 +151,22 @@ public final class DeterministicMatchingEngine implements MatchingEngine {
 
     private static final class SymbolOrderBook {
         private final String symbol;
-        private final NavigableMap<Price, ArrayDeque<RestingOrder>> bids = new TreeMap<>();
-        private final NavigableMap<Price, ArrayDeque<RestingOrder>> asks = new TreeMap<>();
+        private static final int TICK_CAPACITY = 131072;
+        private final PriceLevel[] bidLevels = new PriceLevel[TICK_CAPACITY];
+        private final PriceLevel[] askLevels = new PriceLevel[TICK_CAPACITY];
+        private boolean initialized;
+        private long baseOffsetCents;
+        private int bestBidIdx = -1;
+        private int bestAskIdx = TICK_CAPACITY;
+
         private final Map<String, RestingOrder> byOrderId = new HashMap<>(ORDER_BOOK_INITIAL_CAPACITY);
         private final EventBatch eventBatch = new EventBatch(512);
         private boolean halted;
+
+        private static final class PriceLevel {
+            final ArrayDeque<RestingOrder> queue = new ArrayDeque<>();
+            int orderCount;
+        }
 
         private SymbolOrderBook(String symbol) {
             this.symbol = symbol;
@@ -538,20 +549,33 @@ public final class DeterministicMatchingEngine implements MatchingEngine {
 
         private int fillableQuantity(String clientId, Side side, Price price, int quantity) {
             int fillable = 0;
-            NavigableMap<Price, ArrayDeque<RestingOrder>> contra = side == Side.BUY ? asks : bids;
-            Iterable<Map.Entry<Price, ArrayDeque<RestingOrder>>> levels = side == Side.BUY
-                    ? contra.entrySet()
-                    : contra.descendingMap().entrySet();
-
-            for (Map.Entry<Price, ArrayDeque<RestingOrder>> level : levels) {
-                if (!priceCrosses(side, price, level.getKey())) {
-                    break;
+            if (side == Side.BUY) {
+                for (int i = bestAskIdx; i < TICK_CAPACITY; i++) {
+                    PriceLevel level = askLevels[i];
+                    if (level == null || level.queue.isEmpty()) continue;
+                    long levelPriceCents = baseOffsetCents + i;
+                    if (price != null && price.getCents() < levelPriceCents) {
+                        break;
+                    }
+                    for (RestingOrder restingOrder : level.queue) {
+                        if (!restingOrder.clientId.equals(clientId)) {
+                            fillable += restingOrder.leavesQty;
+                            if (fillable >= quantity) return fillable;
+                        }
+                    }
                 }
-                for (RestingOrder restingOrder : level.getValue()) {
-                    if (!restingOrder.clientId.equals(clientId)) {
-                        fillable += restingOrder.leavesQty;
-                        if (fillable >= quantity) {
-                            return fillable;
+            } else {
+                for (int i = bestBidIdx; i >= 0; i--) {
+                    PriceLevel level = bidLevels[i];
+                    if (level == null || level.queue.isEmpty()) continue;
+                    long levelPriceCents = baseOffsetCents + i;
+                    if (price != null && price.getCents() > levelPriceCents) {
+                        break;
+                    }
+                    for (RestingOrder restingOrder : level.queue) {
+                        if (!restingOrder.clientId.equals(clientId)) {
+                            fillable += restingOrder.leavesQty;
+                            if (fillable >= quantity) return fillable;
                         }
                     }
                 }
@@ -560,11 +584,15 @@ public final class DeterministicMatchingEngine implements MatchingEngine {
         }
 
         private boolean canMatch(Side side, OrderType orderType, Price limitPrice) {
-            Price bestContra = topPrice(side.opposite());
-            if (bestContra == null) {
-                return false;
+            if (side == Side.BUY) {
+                if (bestAskIdx == TICK_CAPACITY) return false;
+                if (orderType == OrderType.MARKET) return true;
+                return limitPrice == null || limitPrice.getCents() >= (baseOffsetCents + bestAskIdx);
+            } else {
+                if (bestBidIdx == -1) return false;
+                if (orderType == OrderType.MARKET) return true;
+                return limitPrice == null || limitPrice.getCents() <= (baseOffsetCents + bestBidIdx);
             }
-            return orderType == OrderType.MARKET || priceCrosses(side, limitPrice, bestContra);
         }
 
         private boolean priceCrosses(Side side, Price aggressivePrice, Price passivePrice) {
@@ -577,35 +605,105 @@ public final class DeterministicMatchingEngine implements MatchingEngine {
         }
 
         private Price topPrice(Side side) {
-            NavigableMap<Price, ArrayDeque<RestingOrder>> sideMap = side == Side.BUY ? bids : asks;
-            if (sideMap.isEmpty()) {
-                return null;
+            if (side == Side.BUY) {
+                return bestBidIdx == -1 ? null : new Price(baseOffsetCents + bestBidIdx);
+            } else {
+                return bestAskIdx == TICK_CAPACITY ? null : new Price(baseOffsetCents + bestAskIdx);
             }
-            return side == Side.BUY ? sideMap.lastKey() : sideMap.firstKey();
         }
 
         private ArrayDeque<RestingOrder> topQueue(Side side) {
-            Price topPrice = topPrice(side);
-            return topPrice == null ? null : queueFor(side, topPrice);
+            if (side == Side.BUY) {
+                return bestBidIdx == -1 ? null : bidLevels[bestBidIdx].queue;
+            } else {
+                return bestAskIdx == TICK_CAPACITY ? null : askLevels[bestAskIdx].queue;
+            }
         }
 
         private ArrayDeque<RestingOrder> queueFor(Side side, Price price) {
-            NavigableMap<Price, ArrayDeque<RestingOrder>> sideMap = side == Side.BUY ? bids : asks;
-            return sideMap.computeIfAbsent(price, ignored -> new ArrayDeque<>());
+            long priceCents = price.getCents();
+            if (!initialized) {
+                baseOffsetCents = priceCents - (TICK_CAPACITY / 2);
+                initialized = true;
+            }
+            long idxLong = priceCents - baseOffsetCents;
+            if (idxLong < 0 || idxLong >= TICK_CAPACITY) {
+                throw new IllegalStateException("Price out of range for array-backed order book: " + priceCents);
+            }
+            int idx = (int) idxLong;
+            
+            if (side == Side.BUY) {
+                if (bidLevels[idx] == null) {
+                    bidLevels[idx] = new PriceLevel();
+                }
+                if (idx > bestBidIdx) {
+                    bestBidIdx = idx;
+                }
+                return bidLevels[idx].queue;
+            } else {
+                if (askLevels[idx] == null) {
+                    askLevels[idx] = new PriceLevel();
+                }
+                if (idx < bestAskIdx) {
+                    bestAskIdx = idx;
+                }
+                return askLevels[idx].queue;
+            }
         }
 
         private void removeEmptyTop(Side side) {
-            Price topPrice = topPrice(side);
-            if (topPrice != null) {
-                removePriceLevelIfEmpty(side, topPrice);
+            if (side == Side.BUY) {
+                if (bestBidIdx != -1) {
+                    PriceLevel level = bidLevels[bestBidIdx];
+                    if (level != null && level.queue.isEmpty()) {
+                        bidLevels[bestBidIdx] = null;
+                        updateBestBidIdx();
+                    }
+                }
+            } else {
+                if (bestAskIdx != TICK_CAPACITY) {
+                    PriceLevel level = askLevels[bestAskIdx];
+                    if (level != null && level.queue.isEmpty()) {
+                        askLevels[bestAskIdx] = null;
+                        updateBestAskIdx();
+                    }
+                }
             }
         }
 
         private void removePriceLevelIfEmpty(Side side, Price price) {
-            NavigableMap<Price, ArrayDeque<RestingOrder>> sideMap = side == Side.BUY ? bids : asks;
-            ArrayDeque<RestingOrder> queue = sideMap.get(price);
-            if (queue != null && queue.isEmpty()) {
-                sideMap.remove(price);
+            long idxLong = price.getCents() - baseOffsetCents;
+            if (idxLong < 0 || idxLong >= TICK_CAPACITY) return;
+            int idx = (int) idxLong;
+            
+            if (side == Side.BUY) {
+                PriceLevel level = bidLevels[idx];
+                if (level != null && level.queue.isEmpty()) {
+                    bidLevels[idx] = null;
+                    if (idx == bestBidIdx) {
+                        updateBestBidIdx();
+                    }
+                }
+            } else {
+                PriceLevel level = askLevels[idx];
+                if (level != null && level.queue.isEmpty()) {
+                    askLevels[idx] = null;
+                    if (idx == bestAskIdx) {
+                        updateBestAskIdx();
+                    }
+                }
+            }
+        }
+
+        private void updateBestBidIdx() {
+            while (bestBidIdx >= 0 && bidLevels[bestBidIdx] == null) {
+                bestBidIdx--;
+            }
+        }
+
+        private void updateBestAskIdx() {
+            while (bestAskIdx < TICK_CAPACITY && askLevels[bestAskIdx] == null) {
+                bestAskIdx++;
             }
         }
     }

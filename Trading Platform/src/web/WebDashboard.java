@@ -75,6 +75,7 @@ public class WebDashboard {
     private static Javalin app;
     private static DashboardTelemetry telemetry;
     private static NettyWebSocketServer webSocketServer;
+    private static exchange.fix.NettyFixServer fixServer;
     private static PrometheusMeterRegistry prometheusRegistry;
 
     public static void start() {
@@ -86,8 +87,13 @@ public class WebDashboard {
         ExchangeRuntime runtime = ExchangeRuntime.getInstance();
         telemetry = new DashboardTelemetry();
         runtime.dispatcher().addRingBufferListener(telemetry);
+        
         webSocketServer = new NettyWebSocketServer(runtime, 9090);
         webSocketServer.start();
+        
+        fixServer = new exchange.fix.NettyFixServer(runtime.gateway(), 64481);
+        runtime.dispatcher().addListener(fixServer);
+
         prometheusRegistry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         app = Javalin.create(config -> {
             config.staticFiles.add("/public", Location.CLASSPATH);
@@ -124,6 +130,7 @@ public class WebDashboard {
             json(ctx, accountSnapshot(runtime, clientId));
         });
         app.get("/api/telemetry/latency", ctx -> json(ctx, LatencyTelemetry.getInstance().snapshot()));
+        app.get("/api/telemetry/latency-stream", ctx -> stream(ctx, "latency", () -> new LatencyStreamPayload(LatencyTelemetry.getInstance().snapshotBase64()), 500));
         app.get("/api/diagnostics/stream", ctx -> streamDiagnostics(ctx, runtime));
         app.get("/api/ohlcv", ctx -> json(ctx, candles(runtime.marketDataEngine().closedCandles())));
         app.post("/api/load-test/accounts", ctx -> {
@@ -754,6 +761,10 @@ public class WebDashboard {
             ExchangeRuntime.getInstance().dispatcher().removeRingBufferListener(telemetry);
             telemetry = null;
         }
+        if (fixServer != null) {
+            fixServer.close();
+            fixServer = null;
+        }
     }
 
     private static final class DashboardTelemetry implements RingBufferEventListener {
@@ -865,6 +876,12 @@ public class WebDashboard {
 
     private record EventDto(String type, long sequenceNumber, String orderId, String clientId, String symbol,
             String timestamp, String message) {
+    }
+
+    private record MarketStreamPayload(String type, Object data) {
+    }
+
+    private record LatencyStreamPayload(String histogramBase64) {
     }
 
     private record MarketCardDto(String symbol, String bid, String bidVol, String ask, String askVol, String last) {
